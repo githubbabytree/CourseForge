@@ -1,0 +1,25 @@
+{
+  "name": "@courseforge/workflow",
+  "version": "0.2.0-alpha.1",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/**/*.test.js"
+  },
+  "dependencies": {
+    "@courseforge/contracts": "0.2.0-alpha.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}

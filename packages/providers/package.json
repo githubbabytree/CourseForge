@@ -1,0 +1,20 @@
+{
+  "name": "@courseforge/providers",
+  "version": "0.2.0-alpha.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "npm run typecheck",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@courseforge/contracts": "0.2.0-alpha.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  }
+}

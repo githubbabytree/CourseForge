@@ -1,0 +1,17 @@
+{
+  "name": "courseforge",
+  "version": "0.2.0-alpha.1",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev": "npm run dev --workspace=@courseforge/web",
+    "check:secrets": "node scripts/check-secrets.mjs",
+    "check:version": "node scripts/check-version.mjs",
+    "prepare": "node scripts/install-git-hooks.mjs",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "verify": "npm run check:secrets && npm run check:version && npm run typecheck && npm test && npm run build"
+  },
+  "engines": { "node": ">=22" }
+}

@@ -1,0 +1,20 @@
+{
+	admin 127.0.0.1:2019
+}
+
+{$COURSEFORGE_SITE_ADDRESS::8080} {
+	encode zstd gzip
+
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
+
+	reverse_proxy web:3000 {
+		health_uri /api/ready
+		health_interval 10s
+		health_timeout 3s
+	}
+}

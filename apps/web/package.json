@@ -1,0 +1,28 @@
+{
+  "name": "@courseforge/web",
+  "version": "0.2.0-alpha.1",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "prepare:reveal": "node scripts/prepare-reveal-runtime.mjs",
+    "prebuild": "node scripts/clean-build-output.mjs && npm run prepare:reveal",
+    "build": "next build",
+    "postbuild": "node scripts/copy-standalone-public.mjs",
+    "start": "next start",
+    "pretest": "npm run prepare:reveal",
+    "test": "node --test test/*.test.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "^15.4.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "reveal.js": "6.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "typescript": "^5.8.3"
+  }
+}

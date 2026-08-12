@@ -1,0 +1,158 @@
+name: courseforge-alpha
+
+# One ingress, three private services. The checked-in defaults bind HTTP only to
+# loopback for local acceptance. Production must set a public HTTPS site address,
+# publish 443 and enable secure cookies; see docs/deployment-alpha.md.
+services:
+  gateway:
+    image: caddy:2.10.2-alpine
+    environment:
+      COURSEFORGE_SITE_ADDRESS: ${COURSEFORGE_SITE_ADDRESS:-:8080}
+    ports:
+      - target: ${GATEWAY_CONTAINER_PORT:-8080}
+        published: ${GATEWAY_PORT:-8080}
+        host_ip: ${GATEWAY_BIND_ADDRESS:-127.0.0.1}
+        protocol: tcp
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - courseforge-caddy-data:/data
+      - courseforge-caddy-config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:2019/config/"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    read_only: true
+    tmpfs: [/tmp]
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.p0
+      args:
+        NEXT_PUBLIC_COURSEFORGE_API_BASE_URL: /api
+        COURSEFORGE_INTERNAL_API_URL: http://api:3001
+    command: ["node", "apps/web/.next/standalone/apps/web/server.js"]
+    environment:
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+    expose: ["3000"]
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    read_only: true
+    tmpfs: [/tmp]
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.p0
+    command: ["node", "apps/api/dist/server.js"]
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3001
+      COURSEFORGE_VERSION: ${COURSEFORGE_VERSION:-dev}
+      DATABASE_URL: postgresql://courseforge:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in ignored .env}@postgres:5432/courseforge
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:?set BOOTSTRAP_ADMIN_EMAIL in ignored .env}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?set BOOTSTRAP_ADMIN_PASSWORD in ignored .env}
+      CORS_ALLOWED_ORIGINS: ${COURSEFORGE_PUBLIC_ORIGIN:-http://127.0.0.1:8080}
+      SECURE_COOKIES: ${SECURE_COOKIES:-false}
+      ARTIFACT_S3_ENDPOINT: http://minio:9000
+      ARTIFACT_S3_REGION: ${ARTIFACT_S3_REGION:-us-east-1}
+      ARTIFACT_S3_BUCKET: ${ARTIFACT_S3_BUCKET:-courseforge-artifacts}
+      ARTIFACT_S3_ACCESS_KEY: ${MINIO_APP_USER:?set MINIO_APP_USER in ignored .env}
+      ARTIFACT_S3_SECRET_KEY: ${MINIO_APP_PASSWORD:?set MINIO_APP_PASSWORD in ignored .env}
+      ARTIFACT_S3_FORCE_PATH_STYLE: "true"
+      ARTIFACT_S3_CREATE_BUCKET: "false"
+    expose: ["3001"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    read_only: true
+    tmpfs: [/tmp]
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: courseforge
+      POSTGRES_USER: courseforge
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in ignored .env}
+    volumes:
+      - courseforge-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U courseforge -d courseforge"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - default
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in ignored .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in ignored .env}
+    expose: ["9000"]
+    volumes:
+      - courseforge-minio:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    read_only: true
+    tmpfs: [/tmp]
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; do sleep 1; done
+        mc mb --ignore-existing "local/$$ARTIFACT_S3_BUCKET" >/dev/null
+        mc admin user add local "$$MINIO_APP_USER" "$$MINIO_APP_PASSWORD" >/dev/null 2>&1 || mc admin user enable local "$$MINIO_APP_USER" >/dev/null
+        printf '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:GetBucketLocation","s3:ListBucket"],"Resource":["arn:aws:s3:::%s"]},{"Effect":"Allow","Action":["s3:GetObject","s3:PutObject"],"Resource":["arn:aws:s3:::%s/*"]}]}' "$$ARTIFACT_S3_BUCKET" "$$ARTIFACT_S3_BUCKET" >/tmp/courseforge-policy.json
+        mc admin policy create local courseforge-artifacts /tmp/courseforge-policy.json >/dev/null 2>&1 || true
+        mc admin policy attach local courseforge-artifacts --user "$$MINIO_APP_USER" >/dev/null
+    environment:
+      MC_CONFIG_DIR: /tmp/.mc
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in ignored .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in ignored .env}
+      MINIO_APP_USER: ${MINIO_APP_USER:?set MINIO_APP_USER in ignored .env}
+      MINIO_APP_PASSWORD: ${MINIO_APP_PASSWORD:?set MINIO_APP_PASSWORD in ignored .env}
+      ARTIFACT_S3_BUCKET: ${ARTIFACT_S3_BUCKET:-courseforge-artifacts}
+    depends_on:
+      minio:
+        condition: service_healthy
+    read_only: true
+    tmpfs: [/tmp]
+    restart: "no"
+
+volumes:
+  courseforge-postgres:
+  courseforge-minio:
+  courseforge-caddy-data:
+  courseforge-caddy-config:

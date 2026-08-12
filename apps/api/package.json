@@ -1,0 +1,27 @@
+{
+  "name": "@courseforge/api",
+  "version": "0.2.0-alpha.1",
+  "private": true,
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "npm run build && node --enable-source-maps dist/server.js",
+    "start": "node dist/server.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/**/*.test.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.922.0",
+    "@courseforge/contracts": "0.2.0-alpha.1",
+    "@courseforge/deck": "0.2.0-alpha.1",
+    "@courseforge/workflow": "0.2.0-alpha.1",
+    "pg": "^8.16.3",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "@types/pg": "^8.15.5",
+    "typescript": "^5.7.3"
+  }
+}
