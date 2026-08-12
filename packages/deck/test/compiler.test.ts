@@ -42,6 +42,17 @@ test("compiler produces self-hosted Reveal markup with speaker notes", () => {
   assert.equal(html.includes("https://"), false);
 });
 
+test("render runtime exposes a deterministic final-render mode", async () => {
+  const bootstrap = await import("node:fs/promises").then((fs) => fs.readFile(new URL("../static/deck-bootstrap.js", import.meta.url), "utf8"));
+  assert.match(bootstrap, /courseforge-render/);
+  assert.match(bootstrap, /transition: "none"/);
+  assert.match(bootstrap, /autoAnimate: false/);
+  assert.match(bootstrap, /document\.fonts/);
+  assert.match(bootstrap, /candidate\.decode/);
+  assert.match(bootstrap, /requestAnimationFrame\(\(\) => requestAnimationFrame/);
+  assert.match(bootstrap, /seek exceeds the deck duration/);
+});
+
 test("compiler escapes user-controlled content and rejects remote assets", () => {
   const escaped = compileRevealHtml({ ...deck, slides: [{ ...deck.slides[0]!, title: "<script>alert(1)</script>" }] });
   assert.equal(escaped.includes("<script>alert(1)</script>"), false);
@@ -97,6 +108,14 @@ test("shared deck image blocks require an explicit asset resolver", () => {
   assert.throws(() => mapDeckSpecV1(shared), /asset URI resolver/);
   const mapped = mapDeckSpecV1(shared, { assetUriForId: (id) => `/assets/${id}.png` });
   assert.match(compileRevealHtml(mapped), /\/assets\/22222222/);
+});
+
+test("artifact bundle emits only the authenticated project image route for shared image assets", async () => {
+  const store = new InMemoryArtifactStore(); const assetId = "22222222-2222-4222-8222-222222222222"; const projectId = "33333333-3333-4333-8333-333333333333";
+  const bundle = await buildDeckArtifactBundle({ schemaVersion: "1", deckId: "11111111-1111-4111-8111-111111111111", revision: 1, title: "图片", themeId: "dark", aspectRatio: "16:9", slides: [{ schemaVersion: "1", slideId: "slide-image", title: "图片", layout: "content", blocks: [{ kind: "image", assetId, alt: "安全示意" }], speakerNotes: "", targetDurationSeconds: 5, learningObjectiveIds: [], sourceIds: [], transition: "fade" }] }, { projectId, jobId: "44444444-4444-4444-8444-444444444444", revision: 1, configurationVersion: "config-1", providerId: "deck" }, store);
+  const html = await store.get(bundle.artifacts.revealHtml.artifactId);
+  assert.match(html!.content, new RegExp(`/v1/projects/${projectId}/image-assets/${assetId}/content`));
+  assert.doesNotMatch(html!.content, /https?:\/\//u);
 });
 
 test("artifact bundle is stable, linked to revision/config and never invents audio or video", async () => {

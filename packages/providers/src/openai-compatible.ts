@@ -10,8 +10,8 @@ import {
   type TextGenerationRequest,
   type TextGenerationResult,
   type TextModelProvider,
-} from "./types.ts";
-import { assertRecord, endpoint, fetchWithTimeout, type FetchPort, readJsonResponse, silentLogger } from "./http.ts";
+} from "./types.js";
+import { assertRecord, endpoint, fetchWithTimeout, type FetchPort, readJsonResponse, silentLogger } from "./http.js";
 
 export interface OpenAICompatibleConfig {
   readonly id: string;
@@ -20,7 +20,7 @@ export interface OpenAICompatibleConfig {
   /** Exact origins approved by an administrator, for example https://models.example.com. */
   readonly allowedOrigins: readonly string[];
   readonly model: string;
-  readonly secretRef: string;
+  readonly secretRef?: string;
   readonly timeoutMs?: number;
 }
 
@@ -61,27 +61,27 @@ abstract class OpenAICompatibleBase {
     }
   }
 
-  protected async chat(payload: Readonly<Record<string, unknown>>, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  protected async chat(payload: Readonly<Record<string, unknown>>, signal?: AbortSignal, maxResponseBytes?: number): Promise<Record<string, unknown>> {
     const response = await this.request("chat/completions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ model: this.config.model, ...payload }),
     }, signal);
-    const body = await readJsonResponse(response, this.config.id);
+    const body = await readJsonResponse(response, this.config.id, maxResponseBytes);
     assertRecord(body, this.config.id);
     return body;
   }
 
   private async request(path: string, init: RequestInit, signal?: AbortSignal): Promise<Response> {
     const url = endpoint(this.config.baseUrl, path, this.config.id, this.config.allowedOrigins);
-    const secret = await this.dependencies.secrets.resolve(this.config.secretRef);
-    if (!secret) throw new ProviderAdapterError(`Provider ${this.config.id} secret could not be resolved`, "invalid_configuration", this.config.id, false);
+    const secret = this.config.secretRef ? await this.dependencies.secrets.resolve(this.config.secretRef) : undefined;
+    if (this.config.secretRef && !secret) throw new ProviderAdapterError(`Provider ${this.config.id} secret could not be resolved`, "invalid_configuration", this.config.id, false);
     this.logger.debug("Calling OpenAI-compatible provider", { providerId: this.config.id, model: this.config.model, operation: path });
     return fetchWithTimeout({
       providerId: this.config.id,
       fetch: this.fetch,
       url,
-      init: { ...init, headers: { ...Object.fromEntries(new Headers(init.headers).entries()), authorization: `Bearer ${secret}` } },
+      init: { ...init, headers: { ...Object.fromEntries(new Headers(init.headers).entries()), ...(secret ? { authorization: `Bearer ${secret}` } : {}) } },
       timeoutMs: this.timeoutMs,
       signal,
     });
@@ -151,12 +151,24 @@ export class OpenAICompatibleMultimodalProvider extends OpenAICompatibleBase imp
     this.metadata = { id: config.id, kind: "multimodal" as const, displayName: config.displayName, version: "openai-compatible-v1", capabilities: ["chat-completions", "image-input", "capability-probe"] };
   }
 
+  async probe(): Promise<ProviderHealth> {
+    const checkedAt = new Date().toISOString();
+    try {
+      await this.inspect({ prompt: "Return only this JSON object: {\"multimodal\":true}", assets: [{ uri: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", mediaType: "image/png" }] }, { runId: "capability-probe", projectId: "capability-probe", configurationVersion: "capability-probe" });
+      return { healthy: true, checkedAt, detail: "bounded image-input probe succeeded" };
+    } catch (error) {
+      const detail = error instanceof ProviderAdapterError ? `${error.code}${error.status ? ` (${error.status})` : ""}` : "unexpected probe failure";
+      this.logger.warn("Multimodal capability probe failed", { providerId: this.config.id, detail });
+      return { healthy: false, checkedAt, detail };
+    }
+  }
+
   async inspect(request: MultimodalRequest, context: RunContext): Promise<MultimodalResult> {
     const content = [
       { type: "text", text: request.prompt },
       ...request.assets.map((asset) => ({ type: "image_url", image_url: { url: asset.uri }, media_type: asset.mediaType })),
     ];
-    const body = await this.chat({ messages: [{ role: "user", content }], response_format: { type: "json_object" } }, context.signal);
+    const body = await this.chat({ messages: [{ role: "user", content }], response_format: { type: "json_object" }, max_tokens: 1200 }, context.signal, 256 * 1024);
     const { content: output } = extractMessage(body, this.config.id);
     let observation: unknown;
     try { observation = JSON.parse(output); } catch (cause) {

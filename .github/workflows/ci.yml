@@ -14,9 +14,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: node scripts/check-secrets.mjs
+      - run: bash -n scripts/backup.sh scripts/restore.sh scripts/capacity-report.sh scripts/container-smoke.sh
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: node --test scripts/ops-scripts.test.mjs
       - run: npm run verify

@@ -1,0 +1,217 @@
+"use client";
+
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+import {
+  type AuthUser,
+  type ConfigurationValue,
+  type CourseClient,
+  type AuditEvent,
+  type ManagedUser,
+  type UserRole,
+  type CreateProviderConfigInput,
+  type PromptVersion,
+  type ProviderConfig,
+  type ProviderKind,
+  type RuntimeConfigSnapshot,
+  type PronunciationLexicon, type ProviderProbeResult, type DesignTemplate,
+  type CreateQaPolicyInput, type QaPolicyVersion,
+} from "@/lib/course-client";
+import { formatShanghaiDateTime } from "@/lib/time.mjs";
+
+const PROVIDER_KINDS: ProviderKind[] = ["text", "multimodal", "search", "design", "tts", "deck", "video"];
+const SECRET_REF = /^(secret|env):\/\/[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$/;
+const SAFE_ID = /^[a-z0-9][a-z0-9._-]{0,99}$/;
+const SAFE_VERSION = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$/;
+const SENSITIVE_KEY = /(?:api[-_]?key|authorization|credential|password|secret|token)/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+type Tab = "providers" | "prompts" | "qa-policy" | "snapshots" | "speech" | "design" | "users" | "audit";
+
+const QA_APPROVAL_OPTIONS=[{value:"blind-listening",label:"中文盲听"},{value:"target-cpu-benchmark",label:"目标 CPU 基准"},{value:"copyright-review",label:"版权复核"}] as const;
+const QA_LICENSE_OPTIONS=[{value:"company-owned",label:"公司自有"},{value:"licensed",label:"已获许可"},{value:"cc0",label:"CC0"}] as const;
+
+function QaPolicyPanel({client,writable}:{client:CourseClient;writable:boolean}){
+  const[items,setItems]=useState<QaPolicyVersion[]>([]);const[loading,setLoading]=useState(true);const[busy,setBusy]=useState("");const[notice,setNotice]=useState<Notice>();
+  const load=useCallback(()=>{setLoading(true);setNotice(undefined);void client.listQaPolicyVersions().then(setItems).catch(reason=>setNotice({tone:"error",message:errorMessage(reason,"QA Policy 读取失败")})).finally(()=>setLoading(false));},[client]);
+  useEffect(load,[load]);
+  const submit=(event:FormEvent<HTMLFormElement>)=>{event.preventDefault();const form=event.currentTarget,data=new FormData(form);const requiredApprovalTypes=QA_APPROVAL_OPTIONS.filter(item=>data.getAll("requiredApprovalTypes").includes(item.value)).map(item=>item.value);const allowedImageLicenseStatuses=QA_LICENSE_OPTIONS.filter(item=>data.getAll("allowedImageLicenseStatuses").includes(item.value)).map(item=>item.value);if(!requiredApprovalTypes.length||!allowedImageLicenseStatuses.length)return setNotice({tone:"error",message:"至少选择一种人工审批证据和一种允许的图片许可"});const input:CreateQaPolicyInput={name:String(data.get("name")??"").trim(),version:String(data.get("version")??"").trim(),description:String(data.get("description")??"").trim(),rules:{minimumCitationCoveragePercent:Number(data.get("minimumCitationCoveragePercent")),minimumSpeakerNotesCoveragePercent:Number(data.get("minimumSpeakerNotesCoveragePercent")),requiredApprovalTypes,allowedImageLicenseStatuses,durationTolerancePercent:Number(data.get("durationTolerancePercent")),requiredVideoEvidenceLevel:String(data.get("requiredVideoEvidenceLevel")) as CreateQaPolicyInput["rules"]["requiredVideoEvidenceLevel"]}};setBusy("create");setNotice(undefined);void client.createQaPolicyVersion(input).then(created=>{setItems(current=>[created,...current]);form.reset();setNotice({tone:"success",message:`已创建 ${created.name} ${created.version} Draft；发布后只影响新捕获的运行快照。`});}).catch(reason=>setNotice({tone:"error",message:errorMessage(reason,"QA Policy 创建失败")})).finally(()=>setBusy(""));};
+  const transition=(item:QaPolicyVersion,operation:"publish"|"deactivate")=>{setBusy(item.qaPolicyId);setNotice(undefined);void client.transitionQaPolicyVersion(item.qaPolicyId,operation).then(updated=>{setItems(current=>current.map(candidate=>candidate.qaPolicyId===updated.qaPolicyId?updated:candidate));setNotice({tone:"success",message:`${updated.name} ${updated.version} 已${operation==="publish"?"发布":"停用"}。`});}).catch(reason=>setNotice({tone:"error",message:errorMessage(reason,"QA Policy 状态变更失败")})).finally(()=>setBusy(""));};
+  return <section className="admin-section"><NoticeBanner notice={notice}/>{writable&&<form className="admin-form" onSubmit={submit} aria-labelledby="qa-policy-form-title"><header><h3 id="qa-policy-form-title">创建 QA Policy Draft</h3><p>规则版本不可变；发布版本由后续运行快照固定绑定。</p></header><div className="admin-form-grid"><label>名称<input name="name" required maxLength={160} defaultValue="security-training-release"/></label><label>版本<input name="version" required maxLength={100} placeholder="v1" pattern="[A-Za-z0-9][A-Za-z0-9._+\u002d]{0,99}"/></label><label className="wide">说明<input name="description" maxLength={500} placeholder="大型互联网公司内部信息安全培训发布门禁"/></label><label>引用覆盖率（%）<input name="minimumCitationCoveragePercent" type="number" min="0" max="100" step="1" defaultValue="100" required/></label><label>讲稿备注覆盖率（%）<input name="minimumSpeakerNotesCoveragePercent" type="number" min="0" max="100" step="1" defaultValue="100" required/></label><fieldset className="wide qa-policy-options"><legend>必需人工审批</legend>{QA_APPROVAL_OPTIONS.map(item=><label key={item.value}><input type="checkbox" name="requiredApprovalTypes" value={item.value} defaultChecked/>{item.label}</label>)}</fieldset><fieldset className="wide qa-policy-options"><legend>允许图片许可</legend>{QA_LICENSE_OPTIONS.map(item=><label key={item.value}><input type="checkbox" name="allowedImageLicenseStatuses" value={item.value} defaultChecked/>{item.label}</label>)}</fieldset><label>时长容差（%）<input name="durationTolerancePercent" type="number" min="0" max="100" step="0.1" defaultValue="10" required/></label><label>视频证据级别<select name="requiredVideoEvidenceLevel" defaultValue="deterministic-final"><option value="deterministic-final">确定性最终渲染</option><option value="preview-only">仅预览证据</option></select></label></div><footer><button className="primary" disabled={busy==="create"}>{busy==="create"?"创建中…":"创建 Draft"}</button></footer></form>}<header className="admin-list-head"><div><h2>QA Policy 版本</h2><p>{writable?"只有平台管理员可创建、发布和停用。":"审计员只读：规则和生命周期均来自真实 API。"}</p></div><button className="secondary" onClick={load} disabled={loading}>{loading?"读取中…":"刷新"}</button></header>{!loading&&!items.length&&!notice&&<div className="admin-empty">尚无 QA Policy 版本。</div>}<div className="admin-card-list">{items.map(item=><article className="admin-card" key={item.qaPolicyId}><header><div><Status value={item.status}/><h3>{item.name} · {item.version}</h3><p>{item.description||"无说明"}</p></div><time dateTime={item.createdAt}>{formatShanghaiDateTime(item.createdAt)}</time></header><dl><div><dt>引用 / 讲稿覆盖率</dt><dd>{item.rules.minimumCitationCoveragePercent}% / {item.rules.minimumSpeakerNotesCoveragePercent}%</dd></div><div><dt>时长容差</dt><dd>±{item.rules.durationTolerancePercent}%</dd></div><div><dt>必需审批</dt><dd>{item.rules.requiredApprovalTypes.join("、")}</dd></div><div><dt>图片许可</dt><dd>{item.rules.allowedImageLicenseStatuses.join("、")}</dd></div><div><dt>视频证据</dt><dd>{item.rules.requiredVideoEvidenceLevel}</dd></div><div><dt>内容哈希</dt><dd><code>{item.contentHash}</code></dd></div></dl>{writable&&<footer>{item.status==="draft"&&<button className="primary" disabled={busy===item.qaPolicyId} onClick={()=>transition(item,"publish")}>发布</button>}{item.status==="published"&&<button className="secondary danger" disabled={busy===item.qaPolicyId} onClick={()=>transition(item,"deactivate")}>停用</button>}</footer>}</article>)}</div></section>;
+}
+
+function DesignTemplatePanel({client,writable}:{client:CourseClient;writable:boolean}){const[items,setItems]=useState<DesignTemplate[]>([]),[error,setError]=useState("");const load=useCallback(()=>{void client.listDesignTemplates().then(setItems).catch(reason=>setError(errorMessage(reason,"模板读取失败")))},[client]);useEffect(load,[load]);return <section className="admin-section"><div className="admin-form"><header><h3>设计模板版本</h3><p>结构化主题 Token 与版式约束不可变；只有已发布版本可绑定 Deck 生成。</p></header>{writable&&<button onClick={()=>void client.createDesignTemplate({name:"security-training",version:`v${items.length+1}`,themeTokens:{primary:"#31d6a0",background:"#071510",foreground:"#eef9f5"},layoutConstraints:{allowedLayouts:["title","content","split","quote","summary"],maxBlocksPerSlide:8}}).then(()=>load()).catch(reason=>setError(errorMessage(reason,"模板创建失败")))}>创建安全培训模板 Draft</button>}{items.map(item=><article className="admin-card" key={item.templateId}><header><div><b>{item.name} · {item.version}</b><p>{item.status} · {item.contentHash.slice(0,16)}…</p></div><time>{formatShanghaiDateTime(item.createdAt)}</time></header><p>{Object.keys(item.themeTokens).length} 个主题 Token · 每页最多 {item.layoutConstraints.maxBlocksPerSlide} 块</p>{writable&&item.status!=="inactive"&&<button onClick={()=>void client.transitionDesignTemplate(item.templateId,item.status==="draft"?"publish":"deactivate").then(()=>load()).catch(reason=>setError(errorMessage(reason,"模板状态变更失败")))}>{item.status==="draft"?"发布":"停用"}</button>}</article>)}{error&&<div className="admin-notice error">{error}</div>}</div></section>}
+
+function SpeechGovernancePanel({client,writable}:{client:CourseClient;writable:boolean}){const[configs,setConfigs]=useState<ProviderConfig[]>([]),[selected,setSelected]=useState(""),[probes,setProbes]=useState<ProviderProbeResult[]>([]),[lexicons,setLexicons]=useState<PronunciationLexicon[]>([]),[entries,setEntries]=useState("CourseForge=Course Forge"),[error,setError]=useState("");const load=()=>void Promise.all([client.listProviderConfigs(),client.listPronunciationLexicons()]).then(([c,l])=>{setConfigs(c);setLexicons(l)}).catch(e=>setError(errorMessage(e,"读取失败")));useEffect(load,[client]);return <section className="admin-section"><div className="admin-form"><header><h3>Provider 能力探测</h3><p>默认不探测。仅管理员可显式触发；审计员只能查看已保存结果，未真实探测不会显示健康。</p></header><select value={selected} onChange={e=>{setSelected(e.target.value);void client.listProviderProbes(e.target.value).then(setProbes)}}><option value="">选择配置版本</option>{configs.map(c=><option key={c.configId} value={c.configId}>{c.providerId} · {c.version}</option>)}</select>{writable&&<button disabled={!selected} onClick={()=>void client.runProviderProbe(selected).then(r=>setProbes(p=>[r,...p])).catch(e=>setError(errorMessage(e,"探测失败")))}>显式运行探测</button>}{probes.map(p=><div className="admin-card" key={p.probeId}><b>{p.healthy?"健康":"不健康 / 未配置"}</b><time>{formatShanghaiDateTime(p.checkedAt)}</time><p>{p.capabilities.join("、")||"无已验证能力"} · {p.errorCode||"ok"}</p></div>)}</div><div className="admin-form"><header><h3>TTS 发音词典</h3><p>版本化 draft → published → inactive。未绑定运行快照和 Worker 时不会声称生效。</p></header>{writable&&<button onClick={()=>{const parsed=entries.split(/\n/).map(v=>v.split("=")).filter(v=>v[0]&&v[1]).map(([term,pronunciation])=>({term:term!.trim(),pronunciation:pronunciation!.trim(),locale:"zh-CN" as const,notes:""}));void client.createPronunciationLexicon({name:"zh-CN-default",version:`v${lexicons.length+1}`,entries:parsed}).then(()=>load()).catch(e=>setError(errorMessage(e,"词典创建失败")))}}>创建 Draft</button>}<textarea value={entries} onChange={e=>setEntries(e.target.value)} rows={5}/>{lexicons.map(l=><div className="admin-card" key={l.lexiconId}><b>{l.name} · {l.version} · {l.status}</b><p>{l.entries.length} 条 · {l.contentHash.slice(0,16)}…</p>{writable&&l.status!=="inactive"&&<button onClick={()=>void client.transitionPronunciationLexicon(l.lexiconId,l.status==="draft"?"publish":"deactivate").then(()=>load())}>{l.status==="draft"?"发布":"停用"}</button>}</div>)}{error&&<div className="admin-notice error">{error}</div>}</div></section>}
+type Notice = { tone: "success" | "error"; message: string } | undefined;
+
+function errorMessage(reason: unknown, fallback: string) {
+  return reason instanceof Error ? reason.message : fallback;
+}
+
+function parseSettings(source: string): Record<string, ConfigurationValue> {
+  let parsed: unknown;
+  try { parsed = JSON.parse(source || "{}"); } catch { throw new Error("Settings 必须是有效的 JSON 对象"); }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Settings 顶层必须是 JSON 对象");
+  const values = parsed as Record<string, unknown>;
+  for (const [key, value] of Object.entries(values)) {
+    if (!key || key.length > 100) throw new Error("Settings 键名长度必须为 1–100 个字符");
+    if (SENSITIVE_KEY.test(key)) throw new Error(`Settings.${key} 疑似敏感字段，请改用 Secret 引用`);
+    const scalar = value === null || ["string", "number", "boolean"].includes(typeof value);
+    const array = Array.isArray(value) && value.length <= 100 && value.every((item) => item === null || ["string", "number", "boolean"].includes(typeof item));
+    if (!scalar && !array) throw new Error(`Settings.${key} 仅支持标量或标量数组`);
+    if (typeof value === "string" && value.length > 2_000) throw new Error(`Settings.${key} 超过 2000 字符`);
+  }
+  return values as Record<string, ConfigurationValue>;
+}
+
+function parseSecretRefs(source: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [index, raw] of source.split(/\r?\n/).entries()) {
+    const line = raw.trim();
+    if (!line) continue;
+    const equals = line.indexOf("=");
+    if (equals < 1) throw new Error(`Secret 引用第 ${index + 1} 行必须使用 name=secret://path 格式`);
+    const key = line.slice(0, equals).trim();
+    const value = line.slice(equals + 1).trim();
+    if (!/^[a-z][a-z0-9._-]{0,99}$/.test(key)) throw new Error(`Secret 引用键名“${key}”不合法`);
+    if (!SECRET_REF.test(value)) throw new Error(`Secret 引用“${key}”只允许 secret:// 或 env://`);
+    result[key] = value;
+  }
+  return result;
+}
+
+function validateEndpoint(value: string): string | undefined {
+  const endpoint = value.trim();
+  if (!endpoint) return undefined;
+  let url: URL;
+  try { url = new URL(endpoint); } catch { throw new Error("Endpoint 必须是完整 URL"); }
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error("Endpoint 只允许 HTTP 或 HTTPS");
+  if (url.username || url.password) throw new Error("Endpoint 禁止内嵌用户名或密码");
+  return endpoint;
+}
+
+function Status({ value }: { value: ProviderConfig["status"] }) {
+  const label = value === "draft" ? "草稿" : value === "published" ? "已发布" : "已停用";
+  return <span className={`admin-status ${value}`}>{label}</span>;
+}
+
+function NoticeBanner({ notice }: { notice: Notice }) {
+  return notice ? <div className={`admin-notice ${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>{notice.message}</div> : null;
+}
+
+function ProviderForm({ client, onCreated }: { client: CourseClient; onCreated: (value: ProviderConfig) => void }) {
+  const [pending, setPending] = useState(false);
+  const [notice, setNotice] = useState<Notice>();
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); setNotice(undefined);
+    const form = event.currentTarget; const data = new FormData(form);
+    try {
+      const providerId = String(data.get("providerId") ?? "").trim(); const version = String(data.get("version") ?? "").trim();
+      if (!SAFE_ID.test(providerId)) throw new Error("Provider ID 只能使用小写字母、数字、点、下划线或连字符");
+      if (!SAFE_VERSION.test(version)) throw new Error("版本号只能使用字母、数字、点、下划线、加号或连字符");
+      const model = String(data.get("model") ?? "").trim();
+      const input: CreateProviderConfigInput = { kind: String(data.get("kind")) as ProviderKind, providerId, version,
+        displayName: String(data.get("displayName") ?? "").trim(), ...(validateEndpoint(String(data.get("endpoint") ?? "")) ? { endpoint: validateEndpoint(String(data.get("endpoint") ?? "")) } : {}),
+        ...(model ? { model } : {}), capabilities: String(data.get("capabilities") ?? "").split(",").map((item) => item.trim()).filter(Boolean),
+        settings: parseSettings(String(data.get("settings") ?? "{}")), secretRefs: parseSecretRefs(String(data.get("secretRefs") ?? "")) };
+      setPending(true);
+      void client.createProviderConfig(input).then((created) => { onCreated(created); form.reset(); setNotice({ tone: "success", message: `已创建 ${created.providerId} ${created.version} 草稿；发布前请复核配置。` }); })
+        .catch((reason: unknown) => setNotice({ tone: "error", message: errorMessage(reason, "Provider 配置创建失败") })).finally(() => setPending(false));
+    } catch (reason) { setNotice({ tone: "error", message: errorMessage(reason, "表单验证失败") }); }
+  };
+  return <form className="admin-form" onSubmit={submit} aria-labelledby="provider-form-title">
+    <header><div><h3 id="provider-form-title">创建 Provider 版本</h3><p>创建后为草稿；配置版本不可直接修改。</p></div></header>
+    <NoticeBanner notice={notice}/>
+    <div className="admin-form-grid">
+      <label>能力类型<select name="kind" defaultValue="text">{PROVIDER_KINDS.map((kind) => <option key={kind}>{kind}</option>)}</select></label>
+      <label>Provider ID<input name="providerId" required maxLength={100} placeholder="openai-compatible" pattern="[a-z0-9][a-z0-9._-]{0,99}"/></label>
+      <label>版本<input name="version" required maxLength={100} placeholder="v1"/></label>
+      <label>显示名称<input name="displayName" required maxLength={160} placeholder="企业文本模型"/></label>
+      <label className="wide">Endpoint <span>不会进行健康状态推断</span><input name="endpoint" type="url" maxLength={2000} placeholder="https://llm.internal.example/v1" aria-describedby="endpoint-help"/><small id="endpoint-help">仅 HTTP(S)，禁止在 URL 中内嵌账号、密码或 Token。</small></label>
+      <label>模型（可选）<input name="model" maxLength={200} placeholder="model-name"/></label>
+      <label>Capabilities <span>逗号分隔</span><input name="capabilities" placeholder="chat, json"/></label>
+      <label className="wide">Settings JSON<textarea name="settings" rows={5} defaultValue="{}" spellCheck={false}/><small>只接受标量或标量数组；key、token、password 等敏感字段会被拒绝。</small></label>
+      <label className="wide">Secret 引用 <span>每行一个</span><textarea name="secretRefs" rows={4} placeholder={"primary=env://COURSEFORGE_TEXT_PROVIDER_VALUE\nexa=secret://courseforge/exa"} spellCheck={false}/><small>只提交引用，不提交密钥值。服务端读取时只返回“已配置”，不会回显引用路径或真实值。</small></label>
+    </div>
+    <footer><button className="primary" disabled={pending}>{pending ? "正在创建…" : "创建草稿版本"}</button></footer>
+  </form>;
+}
+
+function ProviderPanel({ client, writable }: { client: CourseClient; writable: boolean }) {
+  const [items, setItems] = useState<ProviderConfig[]>([]); const [loading, setLoading] = useState(true); const [notice, setNotice] = useState<Notice>(); const [busy, setBusy] = useState("");
+  const load = useCallback(() => { setLoading(true); setNotice(undefined); void client.listProviderConfigs().then(setItems).catch((reason: unknown) => setNotice({ tone: "error", message: errorMessage(reason, "Provider 配置读取失败") })).finally(() => setLoading(false)); }, [client]);
+  useEffect(load, [load]);
+  const transition = (item: ProviderConfig, operation: "publish" | "deactivate") => { setBusy(item.configId); setNotice(undefined); void client.transitionProviderConfig(item.configId, operation).then((updated) => { setItems((current) => current.map((candidate) => candidate.configId === updated.configId ? updated : candidate)); setNotice({ tone: "success", message: `${updated.displayName} ${operation === "publish" ? "已发布" : "已停用"}` }); }).catch((reason: unknown) => setNotice({ tone: "error", message: errorMessage(reason, "状态变更失败") })).finally(() => setBusy("")); };
+  return <section className="admin-section"><NoticeBanner notice={notice}/>{writable && <ProviderForm client={client} onCreated={(created) => setItems((current) => [created, ...current])}/>}<header className="admin-list-head"><div><h2>Provider 配置版本</h2><p>仅展示 API 返回的配置事实；Secret 只展示引用名称。</p></div><button className="secondary" onClick={load} disabled={loading}>{loading ? "读取中…" : "刷新"}</button></header>
+    {!loading && items.length === 0 && !notice && <div className="admin-empty">尚无 Provider 配置。</div>}
+    <div className="admin-card-list">{items.map((item) => <article className="admin-card" key={item.configId}><header><div><Status value={item.status}/><h3>{item.displayName}</h3><p>{item.kind} · {item.providerId} · {item.version}</p></div><time dateTime={item.createdAt}>{formatShanghaiDateTime(item.createdAt)}</time></header>
+      <dl><div><dt>Endpoint</dt><dd>{item.endpoint || "未设置"}</dd></div><div><dt>模型</dt><dd>{item.model || "未设置"}</dd></div><div><dt>Capabilities</dt><dd>{item.capabilities.join(", ") || "未声明"}</dd></div><div><dt>Secret 引用</dt><dd>{Object.keys(item.secretRefs).length ? Object.keys(item.secretRefs).map((key) => <span className="configured-secret" key={key}>{key} · 已配置</span>) : "未设置"}</dd></div></dl>
+      <details><summary>查看 Settings 与版本标识</summary><pre>{JSON.stringify(item.settings, null, 2)}</pre><code>{item.configId}</code></details>
+      {writable && <footer>{item.status === "draft" && <button className="primary" disabled={busy === item.configId} onClick={() => transition(item, "publish")}>发布</button>}{item.status === "published" && <button className="secondary danger" disabled={busy === item.configId} onClick={() => transition(item, "deactivate")}>停用</button>}</footer>}
+    </article>)}</div>
+  </section>;
+}
+
+function PromptForm({ client, onCreated }: { client: CourseClient; onCreated: (value: PromptVersion) => void }) {
+  const [pending, setPending] = useState(false); const [notice, setNotice] = useState<Notice>();
+  const submit = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); setNotice(undefined); const form = event.currentTarget; const data = new FormData(form); const promptKey = String(data.get("promptKey") ?? "").trim(); const version = String(data.get("version") ?? "").trim(); const template = String(data.get("template") ?? "");
+    if (!/^[a-z][a-z0-9._-]{0,99}$/.test(promptKey)) return setNotice({ tone: "error", message: "Prompt Key 必须以小写字母开头，只能包含小写字母、数字、点、下划线或连字符" });
+    if (!SAFE_VERSION.test(version)) return setNotice({ tone: "error", message: "版本号格式不合法" });
+    if (!template.trim()) return setNotice({ tone: "error", message: "提示词模板不能为空" });
+    setPending(true); void client.createPromptVersion({ promptKey, version, description: String(data.get("description") ?? "").trim(), template }).then((created) => { onCreated(created); form.reset(); setNotice({ tone: "success", message: `已创建 ${created.promptKey} ${created.version} 草稿。` }); }).catch((reason: unknown) => setNotice({ tone: "error", message: errorMessage(reason, "Prompt 创建失败") })).finally(() => setPending(false)); };
+  return <form className="admin-form" onSubmit={submit} aria-labelledby="prompt-form-title"><header><div><h3 id="prompt-form-title">创建 Prompt 版本</h3><p>提示词按 Key 与版本管理，发布后由新快照固定引用。</p></div></header><NoticeBanner notice={notice}/><div className="admin-form-grid"><label>Prompt Key<input name="promptKey" required maxLength={100} placeholder="research.material"/></label><label>版本<input name="version" required maxLength={100} placeholder="v1"/></label><label className="wide">说明<input name="description" maxLength={500} placeholder="事实核验与基础材料生成"/></label><label className="wide">模板<textarea name="template" required maxLength={200000} rows={10} placeholder="仅根据引用材料生成：{{sources}}"/><small>不要写入 API Key、Token、密码或其他凭据；服务端会再次执行敏感信息检测。</small></label></div><footer><button className="primary" disabled={pending}>{pending ? "正在创建…" : "创建草稿版本"}</button></footer></form>;
+}
+
+function PromptPanel({ client, writable }: { client: CourseClient; writable: boolean }) {
+  const [items, setItems] = useState<PromptVersion[]>([]); const [loading, setLoading] = useState(true); const [notice, setNotice] = useState<Notice>(); const [busy, setBusy] = useState("");
+  const load = useCallback(() => { setLoading(true); setNotice(undefined); void client.listPromptVersions().then(setItems).catch((reason: unknown) => setNotice({ tone: "error", message: errorMessage(reason, "Prompt 版本读取失败") })).finally(() => setLoading(false)); }, [client]); useEffect(load, [load]);
+  const transition = (item: PromptVersion, operation: "publish" | "deactivate") => { setBusy(item.promptVersionId); setNotice(undefined); void client.transitionPromptVersion(item.promptVersionId, operation).then((updated) => { setItems((current) => current.map((candidate) => candidate.promptVersionId === updated.promptVersionId ? updated : candidate)); setNotice({ tone: "success", message: `${updated.promptKey} ${operation === "publish" ? "已发布" : "已停用"}` }); }).catch((reason: unknown) => setNotice({ tone: "error", message: errorMessage(reason, "状态变更失败") })).finally(() => setBusy("")); };
+  return <section className="admin-section"><NoticeBanner notice={notice}/>{writable && <PromptForm client={client} onCreated={(created) => setItems((current) => [created, ...current])}/>}<header className="admin-list-head"><div><h2>Prompt 版本</h2><p>Prompt 正文只在展开后显示，不包含任何 Secret 配置。</p></div><button className="secondary" onClick={load} disabled={loading}>{loading ? "读取中…" : "刷新"}</button></header><div className="admin-card-list">{items.map((item) => <article className="admin-card" key={item.promptVersionId}><header><div><Status value={item.status}/><h3>{item.promptKey}</h3><p>{item.version} · {item.description || "无说明"}</p></div><time dateTime={item.createdAt}>{formatShanghaiDateTime(item.createdAt)}</time></header><details><summary>查看模板</summary><pre>{item.template}</pre><code>{item.promptVersionId}</code></details>{writable && <footer>{item.status === "draft" && <button className="primary" disabled={busy === item.promptVersionId} onClick={() => transition(item, "publish")}>发布</button>}{item.status === "published" && <button className="secondary danger" disabled={busy === item.promptVersionId} onClick={() => transition(item, "deactivate")}>停用</button>}</footer>}</article>)}</div>{!loading && items.length === 0 && !notice && <div className="admin-empty">尚无 Prompt 版本。</div>}</section>;
+}
+
+function SnapshotView({ snapshot }: { snapshot: RuntimeConfigSnapshot }) {
+  return <article className="snapshot-card"><header><div><h3>运行配置快照</h3><code>{snapshot.snapshotId}</code></div><time dateTime={snapshot.capturedAt}>{formatShanghaiDateTime(snapshot.capturedAt)}</time></header><div className="snapshot-columns"><section><h4>Provider 绑定 · {snapshot.providerBindings.length}</h4>{snapshot.providerBindings.length ? snapshot.providerBindings.map((binding) => <div key={binding.kind}><b>{binding.kind}</b><span>{binding.providerId} · {binding.version}</span><code>{binding.configId}</code></div>) : <p>快照中没有已发布 Provider。</p>}</section><section><h4>Prompt 绑定 · {snapshot.promptBindings.length}</h4>{snapshot.promptBindings.length ? snapshot.promptBindings.map((binding) => <div key={binding.promptKey}><b>{binding.promptKey}</b><span>{binding.version}</span><code>{binding.promptVersionId}</code></div>) : <p>快照中没有已发布 Prompt。</p>}</section><section><h4>QA Policy 绑定</h4>{snapshot.qaPolicyBinding?<div><b>{snapshot.qaPolicyBinding.version}</b><span>{snapshot.qaPolicyBinding.contentHash}</span><code>{snapshot.qaPolicyBinding.qaPolicyId}</code></div>:<p>快照中没有已发布 QA Policy，课程 QA 将不可用。</p>}</section></div></article>;
+}
+
+function SnapshotPanel({ client, writable }: { client: CourseClient; writable: boolean }) {
+  const [snapshot, setSnapshot] = useState<RuntimeConfigSnapshot>(); const [snapshots,setSnapshots]=useState<RuntimeConfigSnapshot[]>([]); const [lookup, setLookup] = useState(""); const [pending, setPending] = useState(false); const [notice, setNotice] = useState<Notice>();
+  const loadList=()=>client.listRuntimeConfigSnapshots(1,50).then(page=>setSnapshots(page.items)).catch((reason:unknown)=>setNotice({tone:"error",message:errorMessage(reason,"快照列表读取失败")}));
+  useEffect(()=>{const recent=sessionStorage.getItem("courseforge.recentSnapshotId");if(recent&&UUID.test(recent))setLookup(recent);void loadList();},[]);
+  const run = (action: () => Promise<RuntimeConfigSnapshot>, failure: string) => { setPending(true); setNotice(undefined); void action().then((value) => { setSnapshot(value); setLookup(value.snapshotId);sessionStorage.setItem("courseforge.recentSnapshotId",value.snapshotId); setNotice({ tone: "success", message: "已从真实 API 读取运行配置快照，并在本会话中记住该 UUID。" });return loadList(); }).catch((reason: unknown) => setNotice({ tone: "error", message: errorMessage(reason, failure) })).finally(() => setPending(false)); };
+  return <section className="admin-section"><div className="snapshot-tools"><div><h2>运行配置快照</h2><p>快照只绑定当前已发布版本，可从真实 API 列表选择；本会话仅记住最近选择。</p></div>{writable && <button className="primary" disabled={pending} onClick={() => run(() => client.captureRuntimeConfigSnapshot(), "快照创建失败")}>创建当前快照</button>}<form onSubmit={(event) => { event.preventDefault(); const id = lookup.trim(); if (!UUID.test(id)) return setNotice({ tone: "error", message: "请输入有效的 Snapshot UUID" }); run(() => client.getRuntimeConfigSnapshot(id), "快照读取失败"); }}><label htmlFor="snapshot-id">选择或按 UUID 查询</label><div><select aria-label="运行快照列表" value={snapshots.some(item=>item.snapshotId===lookup)?lookup:""} onChange={event=>{const id=event.target.value;if(id)run(()=>client.getRuntimeConfigSnapshot(id),"快照读取失败");}}><option value="">最近 50 个快照</option>{snapshots.map(item=><option key={item.snapshotId} value={item.snapshotId}>{formatShanghaiDateTime(item.capturedAt)} · {item.snapshotId}</option>)}</select><input id="snapshot-id" value={lookup} onChange={(event) => setLookup(event.target.value)} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"/><button className="secondary" disabled={pending}>读取</button></div></form></div><NoticeBanner notice={notice}/>{snapshot ? <SnapshotView snapshot={snapshot}/> : <div className="admin-empty">尚未选择运行配置快照。</div>}</section>;
+}
+
+const USER_ROLES: UserRole[] = ["platform_admin", "course_editor", "viewer", "auditor"];
+const ROLE_LABEL: Record<UserRole, string> = { platform_admin: "平台管理员", course_editor: "课程编辑", viewer: "查看者", auditor: "审计员" };
+const validStrongPassword = (value: string) => value.length >= 12 && /[a-z]/.test(value) && /[A-Z]/.test(value) && /[0-9]/.test(value) && /[^A-Za-z0-9]/.test(value);
+
+function UserPanel({ client, writable, currentUserId }: { client: CourseClient; writable: boolean; currentUserId: string }) {
+  const [result, setResult] = useState<{ items: ManagedUser[]; total: number; page: number; pageSize: number }>({ items: [], total: 0, page: 1, pageSize: 25 });
+  const [loading, setLoading] = useState(true); const [notice, setNotice] = useState<Notice>(); const [busy, setBusy] = useState("");
+  const [resetTarget, setResetTarget] = useState<ManagedUser>(); const [resetPhrase, setResetPhrase] = useState("");
+  const load = useCallback((page = result.page) => { setLoading(true); setNotice(undefined); void client.listUsers(page, 25).then(setResult).catch((reason: unknown) => setNotice({ tone: "error", message: errorMessage(reason, "用户读取失败") })).finally(() => setLoading(false)); }, [client, result.page]);
+  useEffect(() => { load(1); }, [client]); // eslint-disable-line react-hooks/exhaustive-deps
+  const update = (item: ManagedUser, input: { role?: UserRole; disabled?: boolean }) => { setBusy(item.userId); setNotice(undefined); void client.updateUser(item.userId, input).then((updated) => { setResult((value) => ({ ...value, items: value.items.map((candidate) => candidate.userId === updated.userId ? updated : candidate) })); setNotice({ tone: "success", message: `${updated.displayName} 已更新；相关会话已按安全策略处理。` }); }).catch((reason: unknown) => setNotice({ tone: "error", message: errorMessage(reason, "用户更新失败") })).finally(() => setBusy("")); };
+  const closeReset = () => { setResetTarget(undefined); setResetPhrase(""); };
+  const reset = () => { if (!resetTarget || !validStrongPassword(resetPhrase)) return setNotice({ tone: "error", message: "密码不符合强度要求" }); const target = resetTarget; setBusy(target.userId); void client.resetUserPassword(target.userId, resetPhrase).then(() => { setNotice({ tone: "success", message: `${target.displayName} 的密码已重置，全部会话已撤销。` }); closeReset(); }).catch((reason: unknown) => setNotice({ tone: "error", message: errorMessage(reason, "密码重置失败") })).finally(() => setBusy("")); };
+  return <section className="admin-section"><NoticeBanner notice={notice}/>{writable && <form className="admin-form" onSubmit={(event) => { event.preventDefault(); const form = event.currentTarget; const data = new FormData(form); const passphrase = String(data.get("password") ?? ""); if (!validStrongPassword(passphrase)) return setNotice({ tone: "error", message: "密码至少 12 位，并包含大小写字母、数字和符号" }); setBusy("create"); void client.createUser({ email: String(data.get("email")), displayName: String(data.get("displayName")), role: String(data.get("role")) as UserRole, ["password"]: passphrase }).then((created) => { form.reset(); setResult((value) => ({ ...value, items: [created, ...value.items], total: value.total + 1 })); setNotice({ tone: "success", message: `${created.displayName} 已创建。` }); }).catch((reason: unknown) => setNotice({ tone: "error", message: errorMessage(reason, "用户创建失败") })).finally(() => setBusy("")); }}><header><div><h3>创建内部用户</h3><p>密码不会回显；首次交付请通过独立安全通道。</p></div></header><div className="admin-form-grid"><label>邮箱<input type="email" name="email" required maxLength={254}/></label><label>显示名称<input name="displayName" required maxLength={120}/></label><label>角色<select name="role" defaultValue="course_editor">{USER_ROLES.map((role) => <option value={role} key={role}>{ROLE_LABEL[role]}</option>)}</select></label><label>临时强密码<input type="password" name="password" required minLength={12} autoComplete="new-password"/></label></div><footer><button className="primary" disabled={busy === "create"}>创建用户</button></footer></form>}
+    <header className="admin-list-head"><div><h2>用户管理</h2><p>共 {result.total} 个账号。返回数据不包含密码摘要或会话标识。</p></div><button className="secondary" onClick={() => load()} disabled={loading}>刷新</button></header>
+    <div className="admin-card-list">{result.items.map((item) => <article className="admin-card" key={item.userId}><header><div><span className={`admin-status ${item.disabled ? "inactive" : "published"}`}>{item.disabled ? "已禁用" : "已启用"}</span><h3>{item.displayName}</h3><p>{item.email}</p></div><time dateTime={item.updatedAt}>{formatShanghaiDateTime(item.updatedAt)}</time></header><dl><div><dt>角色</dt><dd>{writable ? <select aria-label={`${item.displayName} 角色`} value={item.role} disabled={busy === item.userId} onChange={(event) => update(item, { role: event.target.value as UserRole })}>{USER_ROLES.map((role) => <option value={role} key={role}>{ROLE_LABEL[role]}</option>)}</select> : ROLE_LABEL[item.role]}</dd></div><div><dt>用户 ID</dt><dd><code>{item.userId}</code></dd></div></dl>{writable && <footer><button className="secondary" disabled={busy === item.userId} onClick={() => { setResetTarget(item); setResetPhrase(""); }}>重置密码</button><button className="secondary danger" disabled={busy === item.userId || (item.userId === currentUserId && !item.disabled)} onClick={() => update(item, { disabled: !item.disabled })}>{item.disabled ? "启用" : "禁用"}</button></footer>}</article>)}</div>
+    {resetTarget && <div className="artifact-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeReset(); }}><form className="admin-form" role="dialog" aria-modal="true" aria-labelledby="reset-password-title" onSubmit={(event) => { event.preventDefault(); reset(); }}><header><div><h3 id="reset-password-title">重置 {resetTarget.displayName} 的密码</h3><p>提交后立即撤销该用户全部会话。关闭窗口会清空输入。</p></div></header><div className="admin-form-grid"><label className="wide">临时强密码<input type="password" value={resetPhrase} onChange={(event) => setResetPhrase(event.target.value)} autoComplete="new-password" minLength={12} required autoFocus/></label></div><footer><button type="button" className="secondary" onClick={closeReset}>取消</button><button className="primary" disabled={busy === resetTarget.userId}>确认重置</button></footer></form></div>}
+    <div className="admin-pagination"><button className="secondary" disabled={loading || result.page <= 1} onClick={() => load(result.page - 1)}>上一页</button><span>第 {result.page} 页</span><button className="secondary" disabled={loading || result.page * result.pageSize >= result.total} onClick={() => load(result.page + 1)}>下一页</button></div></section>;
+}
+
+function AuditPanel({ client }: { client: CourseClient }) {
+  const [result, setResult] = useState<{ items: AuditEvent[]; total: number; page: number; pageSize: number }>({ items: [], total: 0, page: 1, pageSize: 25 }); const [notice, setNotice] = useState<Notice>(); const [loading, setLoading] = useState(true); const [filters, setFilters] = useState({ action: "", outcome: "", actorId: "", from: "", to: "" });
+  const load = useCallback((page = 1, next = filters) => { setLoading(true); setNotice(undefined); const iso = (value: string) => value ? new Date(value).toISOString() : undefined; void client.listAuditEvents({ page, pageSize: 25, action: next.action || undefined, outcome: next.outcome as "success" | "failure" || undefined, actorId: next.actorId || undefined, from: iso(next.from), to: iso(next.to) }).then(setResult).catch((reason: unknown) => setNotice({ tone: "error", message: errorMessage(reason, "审计事件读取失败") })).finally(() => setLoading(false)); }, [client, filters]);
+  useEffect(() => { load(); }, [client]); // eslint-disable-line react-hooks/exhaustive-deps
+  return <section className="admin-section"><NoticeBanner notice={notice}/><form className="admin-form audit-filter" onSubmit={(event) => { event.preventDefault(); load(1); }}><div className="admin-form-grid"><label>动作<input value={filters.action} onChange={(event) => setFilters({ ...filters, action: event.target.value })} maxLength={200} placeholder="user.update"/></label><label>结果<select value={filters.outcome} onChange={(event) => setFilters({ ...filters, outcome: event.target.value })}><option value="">全部</option><option value="success">成功</option><option value="failure">失败</option></select></label><label>Actor UUID<input value={filters.actorId} onChange={(event) => setFilters({ ...filters, actorId: event.target.value })}/></label><label>开始时间<input type="datetime-local" value={filters.from} onChange={(event) => setFilters({ ...filters, from: event.target.value })}/></label><label>结束时间<input type="datetime-local" value={filters.to} onChange={(event) => setFilters({ ...filters, to: event.target.value })}/></label></div><footer><button className="primary" disabled={loading}>筛选</button></footer></form><header className="admin-list-head"><div><h2>操作审计</h2><p>共 {result.total} 条；所有显示时间均为 Asia/Shanghai（UTC+8）。</p></div></header><div className="admin-card-list">{result.items.map((item) => <article className="admin-card" key={item.auditId}><header><div><span className={`admin-status ${item.outcome === "success" ? "published" : "inactive"}`}>{item.outcome === "success" ? "成功" : "失败"}</span><h3>{item.action}</h3><p>{item.resourceType} · {item.resourceId}</p></div><time dateTime={item.occurredAt}>{formatShanghaiDateTime(item.occurredAt)}</time></header><dl><div><dt>Actor</dt><dd><code>{item.actorId}</code></dd></div><div><dt>Request</dt><dd><code>{item.requestId}</code></dd></div><div><dt>Metadata</dt><dd><code>{JSON.stringify(item.metadata)}</code></dd></div></dl></article>)}</div><div className="admin-pagination"><button className="secondary" disabled={loading || result.page <= 1} onClick={() => load(result.page - 1)}>上一页</button><span>第 {result.page} 页</span><button className="secondary" disabled={loading || result.page * result.pageSize >= result.total} onClick={() => load(result.page + 1)}>下一页</button></div></section>;
+}
+
+export function AdminConsole({ client, user }: { client: CourseClient; user: AuthUser }) {
+  const [tab, setTab] = useState<Tab>("providers"); const writable = user.role === "platform_admin";
+  return <div className="admin-console"><header className="admin-hero"><div><span className="eyebrow">PLATFORM GOVERNANCE</span><h1>模型、提示词与运行快照</h1><p>{writable ? "你可以创建不可变版本、控制发布状态并捕获运行快照。" : "审计员只读视图：可核查版本与快照，所有写操作均不可用。"}</p></div><span className={`admin-access ${writable ? "write" : "read"}`}>{writable ? "管理员 · 可写" : "审计员 · 只读"}</span></header>
+    <nav className="admin-tabs" aria-label="配置管理"><button className={tab === "providers" ? "active" : ""} onClick={() => setTab("providers")}>Providers</button><button className={tab === "prompts" ? "active" : ""} onClick={() => setTab("prompts")}>Prompts</button><button className={tab === "qa-policy" ? "active" : ""} onClick={() => setTab("qa-policy")}>QA Policy</button><button className={tab === "snapshots" ? "active" : ""} onClick={() => setTab("snapshots")}>运行快照</button><button className={tab === "speech" ? "active" : ""} onClick={() => setTab("speech")}>探测与词典</button><button className={tab === "design" ? "active" : ""} onClick={() => setTab("design")}>设计模板</button><button className={tab === "users" ? "active" : ""} onClick={() => setTab("users")}>用户</button><button className={tab === "audit" ? "active" : ""} onClick={() => setTab("audit")}>审计</button></nav>
+    {tab === "providers" ? <ProviderPanel client={client} writable={writable}/> : tab === "prompts" ? <PromptPanel client={client} writable={writable}/> : tab === "qa-policy" ? <QaPolicyPanel client={client} writable={writable}/> : tab === "snapshots" ? <SnapshotPanel client={client} writable={writable}/> : tab === "speech" ? <SpeechGovernancePanel client={client} writable={writable}/> : tab === "design" ? <DesignTemplatePanel client={client} writable={writable}/> : tab === "users" ? <UserPanel client={client} writable={writable} currentUserId={user.id}/> : <AuditPanel client={client}/>}
+  </div>;
+}

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./revisions.css";
 
 export const metadata: Metadata = {
   title: "CourseForge · AI 安全培训工坊",

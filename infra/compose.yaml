@@ -1,4 +1,4 @@
-name: courseforge-alpha
+name: courseforge
 
 # One ingress, three private services. The checked-in defaults bind HTTP only to
 # loopback for local acceptance. Production must set a public HTTPS site address,
@@ -62,6 +62,14 @@ services:
       HOST: 0.0.0.0
       PORT: 3001
       COURSEFORGE_VERSION: ${COURSEFORGE_VERSION:-dev}
+      COURSEFORGE_DEPLOYMENT_PROFILE: ${COURSEFORGE_DEPLOYMENT_PROFILE:-development}
+      COURSEFORGE_SITE_ADDRESS: ${COURSEFORGE_SITE_ADDRESS:-:8080}
+      COURSEFORGE_SEARCH_EXECUTABLES: ${COURSEFORGE_SEARCH_EXECUTABLES:-/workspace/node_modules/.bin/mcporter}
+      COURSEFORGE_PROVIDER_EXA_VALUE: ${COURSEFORGE_PROVIDER_EXA_VALUE:-}
+      COURSEFORGE_TEXT_PROVIDER_TOKEN: ${COURSEFORGE_TEXT_PROVIDER_TOKEN:-}
+      COURSEFORGE_MULTIMODAL_PROVIDER_TOKEN: ${COURSEFORGE_MULTIMODAL_PROVIDER_TOKEN:-}
+      COURSEFORGE_DESIGN_PROVIDER_TOKEN: ${COURSEFORGE_DESIGN_PROVIDER_TOKEN:-}
+      COURSEFORGE_TTS_WORKER_TOKEN: ${TTS_WORKER_AUTH_TOKEN:-}
       DATABASE_URL: postgresql://courseforge:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in ignored .env}@postgres:5432/courseforge
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:?set BOOTSTRAP_ADMIN_EMAIL in ignored .env}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?set BOOTSTRAP_ADMIN_PASSWORD in ignored .env}
@@ -74,6 +82,10 @@ services:
       ARTIFACT_S3_SECRET_KEY: ${MINIO_APP_PASSWORD:?set MINIO_APP_PASSWORD in ignored .env}
       ARTIFACT_S3_FORCE_PATH_STYLE: "true"
       ARTIFACT_S3_CREATE_BUCKET: "false"
+      DOCUMENT_WORKER_URL: http://document-worker:3010
+      VIDEO_WORKER_URL: http://video-worker:3020
+      VIDEO_WORKER_SECRET_REF: env://COURSEFORGE_VIDEO_WORKER_TOKEN
+      COURSEFORGE_VIDEO_WORKER_TOKEN: ${VIDEO_WORKER_AUTH_TOKEN:?set VIDEO_WORKER_AUTH_TOKEN in ignored .env}
     expose: ["3001"]
     depends_on:
       postgres:
@@ -82,6 +94,11 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+      document-worker:
+        condition: service_healthy
+      video-worker:
+        condition: service_healthy
+    networks: [default, parser]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 5s
@@ -89,6 +106,115 @@ services:
       retries: 20
     read_only: true
     tmpfs: [/tmp]
+    restart: unless-stopped
+
+  video-worker:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.video-worker
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3020
+      VIDEO_WORKER_ENGINE_REVISION: ${VIDEO_WORKER_ENGINE_REVISION:-playwright-1.55.0-ffmpeg-noble}
+      VIDEO_WORKER_IMAGE_DIGEST: ${VIDEO_WORKER_IMAGE_DIGEST:?set VIDEO_WORKER_IMAGE_DIGEST to the built image sha256 digest}
+      VIDEO_WORKER_AUTH_TOKEN: ${VIDEO_WORKER_AUTH_TOKEN:?set VIDEO_WORKER_AUTH_TOKEN in ignored .env}
+      VIDEO_WORKER_S3_ENDPOINT: http://minio:9000
+      VIDEO_WORKER_S3_REGION: ${ARTIFACT_S3_REGION:-us-east-1}
+      VIDEO_WORKER_S3_BUCKET: ${ARTIFACT_S3_BUCKET:-courseforge-artifacts}
+      VIDEO_WORKER_S3_ACCESS_KEY: ${MINIO_VIDEO_READER_USER:?set MINIO_VIDEO_READER_USER in ignored .env}
+      VIDEO_WORKER_S3_SECRET_KEY: ${MINIO_VIDEO_READER_PASSWORD:?set MINIO_VIDEO_READER_PASSWORD in ignored .env}
+      VIDEO_RENDER_TIMEOUT_MS: ${VIDEO_RENDER_TIMEOUT_MS:-600000}
+    expose: ["3020"]
+    depends_on:
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    networks: [parser]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3020/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+    read_only: true
+    tmpfs:
+      - /tmp:size=1g,nosuid,nodev
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2.0
+    shm_size: 512m
+    restart: unless-stopped
+
+  # Optional CPU TTS process boundary. The profile is disabled by default and
+  # intentionally has no model download/bootstrap path. See docs/tts-worker.md.
+  tts-worker:
+    profiles: ["tts"]
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.tts-worker
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3030
+      TTS_ENGINE: ${TTS_ENGINE:-disabled}
+      TTS_ENGINE_REVISION: ${TTS_ENGINE_REVISION:-disabled}
+      TTS_MODEL_ID: ${TTS_MODEL_ID:-disabled}
+      TTS_MODEL_PATH: /models/model.bin
+      TTS_MODEL_SHA256: ${TTS_MODEL_SHA256:-disabled}
+      TTS_MODEL_LICENSE: ${TTS_MODEL_LICENSE:-disabled}
+      TTS_VOICE_ID: ${TTS_VOICE_ID:-disabled}
+      TTS_VOICE_DISPLAY_NAME: ${TTS_VOICE_DISPLAY_NAME:-disabled}
+      TTS_RUNNER_PATH: /opt/courseforge/engine-runner
+      TTS_WORKER_AUTH_TOKEN: ${TTS_WORKER_AUTH_TOKEN:-replace-with-at-least-32-random-characters}
+      TTS_SAMPLE_RATE_HZ: ${TTS_SAMPLE_RATE_HZ:-24000}
+      TTS_CHANNELS: ${TTS_CHANNELS:-1}
+      TTS_MAX_AUDIO_BYTES: ${TTS_MAX_AUDIO_BYTES:-33554432}
+      TTS_SYNTHESIS_TIMEOUT_SECONDS: ${TTS_SYNTHESIS_TIMEOUT_SECONDS:-120}
+    expose: ["3030"]
+    volumes:
+      - ${TTS_MODEL_HOST_PATH:-./disabled/tts-model.bin}:/models/model.bin:ro
+      - ${TTS_RUNNER_HOST_PATH:-./disabled/engine-runner}:/opt/courseforge/engine-runner:ro
+    networks: [parser]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3030/health', timeout=2).read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    mem_limit: 4g
+    cpus: 2.0
+    restart: unless-stopped
+
+  document-worker:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.p0
+    command: ["node", "packages/document-worker/dist/server.js"]
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3010
+      DOCUMENT_PARSE_TIMEOUT_MS: "20000"
+    expose: ["3010"]
+    networks: [parser]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3010/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 1.0
     restart: unless-stopped
 
   postgres:
@@ -124,6 +250,7 @@ services:
       retries: 20
     read_only: true
     tmpfs: [/tmp]
+    networks: [default, parser]
     restart: unless-stopped
 
   minio-init:
@@ -137,12 +264,18 @@ services:
         printf '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:GetBucketLocation","s3:ListBucket"],"Resource":["arn:aws:s3:::%s"]},{"Effect":"Allow","Action":["s3:GetObject","s3:PutObject"],"Resource":["arn:aws:s3:::%s/*"]}]}' "$$ARTIFACT_S3_BUCKET" "$$ARTIFACT_S3_BUCKET" >/tmp/courseforge-policy.json
         mc admin policy create local courseforge-artifacts /tmp/courseforge-policy.json >/dev/null 2>&1 || true
         mc admin policy attach local courseforge-artifacts --user "$$MINIO_APP_USER" >/dev/null
+        mc admin user add local "$$MINIO_VIDEO_READER_USER" "$$MINIO_VIDEO_READER_PASSWORD" >/dev/null 2>&1 || mc admin user enable local "$$MINIO_VIDEO_READER_USER" >/dev/null
+        printf '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:GetObject"],"Resource":["arn:aws:s3:::%s/artifacts/*"]}]}' "$$ARTIFACT_S3_BUCKET" >/tmp/courseforge-video-reader-policy.json
+        mc admin policy create local courseforge-video-reader /tmp/courseforge-video-reader-policy.json >/dev/null 2>&1 || true
+        mc admin policy attach local courseforge-video-reader --user "$$MINIO_VIDEO_READER_USER" >/dev/null
     environment:
       MC_CONFIG_DIR: /tmp/.mc
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in ignored .env}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in ignored .env}
       MINIO_APP_USER: ${MINIO_APP_USER:?set MINIO_APP_USER in ignored .env}
       MINIO_APP_PASSWORD: ${MINIO_APP_PASSWORD:?set MINIO_APP_PASSWORD in ignored .env}
+      MINIO_VIDEO_READER_USER: ${MINIO_VIDEO_READER_USER:?set MINIO_VIDEO_READER_USER in ignored .env}
+      MINIO_VIDEO_READER_PASSWORD: ${MINIO_VIDEO_READER_PASSWORD:?set MINIO_VIDEO_READER_PASSWORD in ignored .env}
       ARTIFACT_S3_BUCKET: ${ARTIFACT_S3_BUCKET:-courseforge-artifacts}
     depends_on:
       minio:
@@ -156,3 +289,8 @@ volumes:
   courseforge-minio:
   courseforge-caddy-data:
   courseforge-caddy-config:
+
+networks:
+  default:
+  parser:
+    internal: true

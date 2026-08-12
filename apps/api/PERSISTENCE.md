@@ -43,6 +43,6 @@ and value parameterization. A deployment is not production-ready until a real
 PostgreSQL restart plus backup/restore test also passes.
 ## Artifact persistence boundary
 
-Migration `002_artifacts.sql` durably stores immutable, content-addressed artifact metadata only. Artifact bytes are accessed through the `ArtifactBlobStore` port. The internal-alpha server intentionally uses `InMemoryArtifactBlobStore`, so generated HTML bytes do not survive a restart even when PostgreSQL is enabled.
+Migration `002_artifacts.sql` durably stores immutable, content-addressed artifact metadata. Artifact bytes are accessed through the `ArtifactBlobStore` port. When S3-compatible configuration is present, the server uses the bounded private object-store adapter; otherwise only non-production development and tests may use `InMemoryArtifactBlobStore`, whose bytes do not survive a restart.
 
 Production must provide a bounded object-storage adapter (for example S3-compatible storage) with server-side encryption, retention policy, integrity verification, and private bucket access. Database rows and API responses never contain or trust filesystem paths, object-store URLs, or generator-provided URIs; authorized content is served through the project-scoped API route.

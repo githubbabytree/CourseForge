@@ -1,0 +1,22 @@
+{
+  "name": "@courseforge/document-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/server.js",
+  "types": "dist/extract.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node ../../scripts/run-built-tests.mjs",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@courseforge/contracts": "1.0.0",
+    "@courseforge/ingestion": "1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "typescript": "^5.7.3"
+  }
+}

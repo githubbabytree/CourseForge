@@ -1,4 +1,4 @@
-import type { DeckSpecV1 } from "@courseforge/contracts";
+import type { DeckSpecV1, TtsPronunciationLexiconV2 } from "@courseforge/contracts";
 
 export type ProviderKind =
   | "text"
@@ -121,6 +121,7 @@ export interface SearchResult {
   readonly url: string;
   readonly snippet: string;
   readonly publishedAt?: string;
+  readonly imageUrl?: string;
 }
 
 export interface SearchProvider extends BaseProvider {
@@ -144,7 +145,20 @@ export interface DesignDirection {
 
 export interface DeckBuildInput extends CourseDesignInput {
   readonly directionId: string;
+  readonly directionThemeTokens?: Readonly<Record<string, string>>;
+  readonly template?: {
+    readonly templateId: string;
+    readonly contentHash: string;
+    readonly themeTokens: Readonly<Record<string, string>>;
+    readonly layoutConstraints: { readonly allowedLayouts: readonly string[]; readonly maxBlocksPerSlide: number };
+  };
   readonly outline: readonly string[];
+  readonly sections?: readonly {
+    readonly title: string;
+    readonly keyPoints: readonly string[];
+    readonly speakerNotes: string;
+    readonly sourceIds: readonly string[];
+  }[];
 }
 
 export interface DesignProvider extends BaseProvider {
@@ -164,12 +178,23 @@ export interface SpeechRequest {
   readonly voiceId: string;
   readonly speed?: number;
   readonly format?: "wav" | "mp3";
+  /** Immutable pronunciation data pinned by the runtime snapshot. */
+  readonly pronunciationLexicon?: TtsPronunciationLexiconV2;
 }
 
 export interface AudioArtifact {
   readonly uri: string;
   readonly durationMs: number;
   readonly contentHash: string;
+  /** Present when a binary sidecar returns audio directly for persistence by the caller. */
+  readonly bytes?: Uint8Array;
+  readonly mediaType?: "audio/wav" | "audio/L16";
+  readonly sampleRateHz?: number;
+  readonly channels?: 1 | 2;
+  readonly bitsPerSample?: 16;
+  /** Verified response provenance when a lexicon was requested. */
+  readonly appliedLexiconId?: string;
+  readonly appliedLexiconContentHash?: string;
 }
 
 export interface TTSProvider extends BaseProvider {
@@ -229,7 +254,13 @@ export interface VideoRenderRequest {
 export interface VideoArtifact {
   readonly uri: string;
   readonly durationMs: number;
+  /** FFprobe-verified encoded video frame count. */
+  readonly frameCount?: number;
   readonly contentHash: string;
+  /** Present when a binary render sidecar returns a persistable MP4 body. */
+  readonly bytes?: Uint8Array;
+  readonly mediaType?: "video/mp4";
+  readonly provenance?: { readonly rendererImageDigest: string; readonly browserRevision: string; readonly ffmpegRevision: string; readonly fontBundleSha256: string };
 }
 
 export interface VideoRendererProvider extends BaseProvider {

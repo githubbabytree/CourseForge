@@ -1,20 +1,26 @@
 {
   "name": "@courseforge/providers",
-  "version": "0.2.0-alpha.2",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   },
   "scripts": {
-    "build": "npm run typecheck",
-    "test": "node --experimental-strip-types --test test/*.test.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@courseforge/contracts": "0.2.0-alpha.2"
+    "@courseforge/contracts": "1.0.0"
   },
   "devDependencies": {
+    "tsx": "^4.20.5",
     "typescript": "^5.9.2"
   }
 }

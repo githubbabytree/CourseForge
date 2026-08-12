@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DuplicateProviderError, MockTextProvider, ProviderNotFoundError, ProviderRegistry, createMockProviders, externalProviderCatalog } from "../src/index.ts";
+import { DuplicateProviderError, HUASHU_DESIGN_LICENSE, HUASHU_DESIGN_UPSTREAM_REVISION, MockTextProvider, ProviderNotFoundError, ProviderRegistry, createMockProviders, externalProviderCatalog } from "../src/index.ts";
 
 test("registry stores and resolves every provider kind", () => {
   const registry = new ProviderRegistry();
@@ -19,4 +19,7 @@ test("external catalog does not embed secrets or model payloads", () => {
   const serialized = JSON.stringify(externalProviderCatalog);
   assert.equal(serialized.includes("sk-"), false);
   assert.ok(externalProviderCatalog.every((provider) => provider.configurationKeys.length > 0));
+  const huashu = externalProviderCatalog.find((provider) => provider.metadata.id === "huashu-design");
+  assert.equal(huashu?.metadata.sourceRevision, HUASHU_DESIGN_UPSTREAM_REVISION);
+  assert.deepEqual(huashu?.source?.license, HUASHU_DESIGN_LICENSE);
 });

@@ -1,6 +1,6 @@
 {
   "name": "@courseforge/contracts",
-  "version": "0.2.0-alpha.2",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
@@ -14,7 +14,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test dist/**/*.test.js"
+    "test": "npm run build && node ../../scripts/run-built-tests.mjs"
   },
   "dependencies": {
     "zod": "^3.24.2"

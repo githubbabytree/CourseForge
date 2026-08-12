@@ -48,13 +48,21 @@ test("S3 store derives a fixed bucket/key and returns defensive bytes", async ()
   assert.deepEqual(get.input, { Bucket: "courseforge-artifacts", Key: `artifacts/${OTHER_ID}` });
 });
 
-test("S3 store rejects arbitrary keys and content over 10 MB", async () => {
+test("S3 range reads issue a single bounded GetObject request", async () => {
+  const client = new FakeS3Client(); const store = new S3ArtifactBlobStore(client, "courseforge-artifacts");
+  client.responses.push({ Body: { transformToByteArray: async () => Uint8Array.from([4, 5, 6]) }, ContentLength: 3 });
+  assert.deepEqual(await store.getRange(ARTIFACT_ID, 10, 12), Uint8Array.from([4, 5, 6]));
+  const get = client.commands[0]; assert.ok(get instanceof GetObjectCommand);
+  assert.deepEqual(get.input, { Bucket: "courseforge-artifacts", Key: `artifacts/${ARTIFACT_ID}`, Range: "bytes=10-12" });
+});
+
+test("S3 store rejects arbitrary keys and content over its 256 MB binary ceiling", async () => {
   const client = new FakeS3Client();
   const store = new S3ArtifactBlobStore(client, "courseforge-artifacts");
   await assert.rejects(() => store.put("../other", Uint8Array.of(1)), InvalidArtifactError);
   await assert.rejects(() => store.get("s3://other/private"), InvalidArtifactError);
-  await assert.rejects(() => store.put(ARTIFACT_ID, new Uint8Array(10 * 1024 * 1024 + 1)), InvalidArtifactError);
-  client.responses.push({ Body: { transformToByteArray: async () => new Uint8Array() }, ContentLength: 10 * 1024 * 1024 + 1 });
+  await assert.rejects(() => store.put(ARTIFACT_ID, { byteLength: 256 * 1024 * 1024 + 1 } as Uint8Array), InvalidArtifactError);
+  client.responses.push({ Body: { transformToByteArray: async () => new Uint8Array() }, ContentLength: 256 * 1024 * 1024 + 1 });
   await assert.rejects(() => store.get(ARTIFACT_ID), InvalidArtifactError);
   assert.equal(client.commands.length, 1);
 });

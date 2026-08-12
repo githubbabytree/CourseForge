@@ -7,7 +7,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { InMemoryArtifactBlobStore, InvalidArtifactError, type ArtifactBlobStore } from "./artifacts.js";
 
-const MAX_ARTIFACT_BYTES = 10 * 1024 * 1024;
+const MAX_ARTIFACT_BYTES = 256 * 1024 * 1024;
 const ARTIFACT_ID = /^artifact-[a-f0-9]{64}$/;
 const BUCKET = /^(?=.{3,63}$)(?!.*\.\.)(?!\d{1,3}(?:\.\d{1,3}){3}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])$/;
 
@@ -60,7 +60,7 @@ const readBodyLimited = async (body: unknown): Promise<Uint8Array> => {
     for await (const chunk of body as AsyncIterable<unknown>) {
       const bytes = asBytes(chunk);
       total += bytes.byteLength;
-      if (total > MAX_ARTIFACT_BYTES) throw new InvalidArtifactError("Artifact exceeds 10 MB");
+      if (total > MAX_ARTIFACT_BYTES) throw new InvalidArtifactError("Blob exceeds 256 MB");
       chunks.push(bytes);
     }
     return Uint8Array.from(Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), total));
@@ -68,7 +68,7 @@ const readBodyLimited = async (body: unknown): Promise<Uint8Array> => {
   const transform = (body as { transformToByteArray?: () => Promise<Uint8Array> }).transformToByteArray;
   if (typeof transform !== "function") throw new ArtifactBlobStoreUnavailableError();
   const bytes = await transform.call(body);
-  if (bytes.byteLength > MAX_ARTIFACT_BYTES) throw new InvalidArtifactError("Artifact exceeds 10 MB");
+  if (bytes.byteLength > MAX_ARTIFACT_BYTES) throw new InvalidArtifactError("Blob exceeds 256 MB");
   return Uint8Array.from(bytes);
 };
 
@@ -108,7 +108,7 @@ export class S3ArtifactBlobStore implements ArtifactBlobStore {
 
   async put(artifactId: string, content: Uint8Array): Promise<void> {
     const Key = this.key(artifactId);
-    if (content.byteLength > MAX_ARTIFACT_BYTES) throw new InvalidArtifactError("Artifact exceeds 10 MB");
+    if (content.byteLength > MAX_ARTIFACT_BYTES) throw new InvalidArtifactError("Blob exceeds 256 MB");
     try {
       await this.client.send(new PutObjectCommand({
         Bucket: this.bucket,
@@ -125,8 +125,28 @@ export class S3ArtifactBlobStore implements ArtifactBlobStore {
     try {
       const result = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key }));
       const contentLength = result.ContentLength;
-      if (typeof contentLength === "number" && contentLength > MAX_ARTIFACT_BYTES) throw new InvalidArtifactError("Artifact exceeds 10 MB");
+      if (typeof contentLength === "number" && contentLength > MAX_ARTIFACT_BYTES) throw new InvalidArtifactError("Blob exceeds 256 MB");
       return await readBodyLimited(result.Body);
+    } catch (error) {
+      if (error instanceof InvalidArtifactError) throw error;
+      if (isNotFound(error)) return undefined;
+      if (error instanceof ArtifactBlobStoreUnavailableError) throw error;
+      throw new ArtifactBlobStoreUnavailableError();
+    }
+  }
+
+  async getRange(artifactId: string, start: number, endInclusive: number): Promise<Uint8Array | undefined> {
+    const Key = this.key(artifactId);
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(endInclusive) || start < 0 || endInclusive < start || endInclusive - start + 1 > MAX_ARTIFACT_BYTES) {
+      throw new InvalidArtifactError("Invalid blob range");
+    }
+    try {
+      const result = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key, Range: `bytes=${start}-${endInclusive}` }));
+      const expected = endInclusive - start + 1;
+      if (typeof result.ContentLength === "number" && result.ContentLength !== expected) throw new ArtifactBlobStoreUnavailableError();
+      const bytes = await readBodyLimited(result.Body);
+      if (bytes.byteLength !== expected) throw new ArtifactBlobStoreUnavailableError();
+      return bytes;
     } catch (error) {
       if (error instanceof InvalidArtifactError) throw error;
       if (isNotFound(error)) return undefined;

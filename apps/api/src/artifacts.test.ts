@@ -3,11 +3,12 @@ import { createHash } from "node:crypto";
 import test, { type TestContext } from "node:test";
 import type { AddressInfo } from "node:net";
 import { CONTRACT_VERSION } from "@courseforge/contracts";
+import { InMemoryArtifactStore, createDeckArtifactBuilder } from "@courseforge/deck";
 import { createApiServer, createAppState } from "./app.js";
 import {
   InMemoryArtifactBlobStore,
   InvalidArtifactError,
-  persistGeneratedArtifact,
+  persistBinaryArtifact, persistDeckArtifactBundle, persistGeneratedArtifact, publicArtifactMetadata,
   type ArtifactMetadataRecord
 } from "./artifacts.js";
 import { InMemoryCourseForgeRepository } from "./repositories.js";
@@ -88,7 +89,7 @@ const fixture = async (t: TestContext) => {
     });
     return response.headers.get("set-cookie")?.split(";")[0] ?? "";
   };
-  return { base, repository, saved, jsonArtifact, ownerCookie: await login("editor@example.test"), outsiderCookie: await login("viewer@example.test") };
+  return { base, repository, blobStore, saved, jsonArtifact, ownerCookie: await login("editor@example.test"), outsiderCookie: await login("viewer@example.test") };
 };
 
 test("artifact list and metadata expose only canonical API locations", async (t) => {
@@ -134,4 +135,53 @@ test("artifact import rejects tampered content and unsupported MIME", async () =
   const blobs = new InMemoryArtifactBlobStore();
   await assert.rejects(() => persistGeneratedArtifact(repository, blobs, { ...artifactFor(`${html}tampered`), metadata: artifactFor(html).metadata }), InvalidArtifactError);
   await assert.rejects(() => persistGeneratedArtifact(repository, blobs, artifactFor(html, { mediaType: "application/json" })), InvalidArtifactError);
+});
+
+test("Deck bundle preflights all three artifacts before exposing any metadata", async () => {
+  const repository = new InMemoryCourseForgeRepository();
+  const blobs = new InMemoryArtifactBlobStore();
+  const source = new InMemoryArtifactStore();
+  const deck = { schemaVersion: "1" as const, deckId: crypto.randomUUID(), revision: 1, title: "Atomic deck", themeId: "security-dark", aspectRatio: "16:9" as const,
+    slides: [{ schemaVersion: "1" as const, slideId: "slide-1", title: "One", layout: "content" as const, blocks: [{ kind: "text" as const, body: "Body" }], speakerNotes: "Notes", targetDurationSeconds: 10, learningObjectiveIds: ["objective-1"], sourceIds: [], transition: "fade" as const }] };
+  const bundle = await createDeckArtifactBuilder(source)(deck, { projectId: PROJECT_A, jobId: JOB_ID, revision: 1, configurationVersion: "config-v1", providerId: "deterministic-deck" });
+  const incomplete = { get: async (artifactId: string) => artifactId === bundle.artifacts.renderManifest.artifactId ? undefined : source.get(artifactId), list: source.list.bind(source), put: source.put.bind(source) };
+  await assert.rejects(persistDeckArtifactBundle(repository, blobs, incomplete, bundle), /Generated artifact is missing/);
+  assert.deepEqual(await repository.listArtifactMetadata(PROJECT_A), []);
+  assert.equal(await blobs.get(bundle.artifacts.deckSpec.artifactId), undefined);
+});
+
+test("TTS binary artifacts are content-addressed and expose only approved content paths", async () => {
+  const repository = new InMemoryCourseForgeRepository();
+  const blobs = new InMemoryArtifactBlobStore();
+  const audio = Buffer.from("RIFF0000WAVEfixture", "ascii");
+  const metadata = await persistBinaryArtifact({
+    repository, blobStore: blobs, projectId: PROJECT_A, jobId: JOB_ID,
+    configurationVersion: "snapshot-v1", providerId: "tts-fixture", kind: "audio-wav",
+    mediaType: "audio/wav", content: audio,
+  });
+  assert.deepEqual(Buffer.from((await blobs.get(metadata.artifactId))!), audio);
+  assert.match(publicArtifactMetadata(metadata).contentPath ?? "", /\/content$/);
+  await assert.rejects(persistBinaryArtifact({
+    repository, blobStore: blobs, projectId: PROJECT_A, jobId: JOB_ID,
+    configurationVersion: "snapshot-v1", providerId: "tts-fixture", kind: "audio-wav",
+    mediaType: "application/json", content: audio,
+  }), InvalidArtifactError);
+  await assert.rejects(persistBinaryArtifact({
+    repository, blobStore: blobs, projectId: PROJECT_A, jobId: JOB_ID,
+    configurationVersion: "snapshot-v1", providerId: "tts-fixture", kind: "audio-wav",
+    mediaType: "audio/wav", content: { byteLength: 20 * 1024 * 1024 + 1 } as Uint8Array,
+  }), InvalidArtifactError);
+});
+
+test("authenticated audio content is integrity-checked, private and not frame-enabled", async (t) => {
+  const { base, repository, blobStore, ownerCookie } = await fixture(t);
+  const audio = Buffer.from("RIFF0000WAVEfixture", "ascii");
+  const metadata = await persistBinaryArtifact({
+    repository, blobStore, projectId: PROJECT_A, jobId: JOB_ID, configurationVersion: "snapshot-v1",
+    providerId: "tts-fixture", kind: "audio-wav", mediaType: "audio/wav", content: audio,
+  });
+  const response = await fetch(`${base}/v1/projects/${PROJECT_A}/artifacts/${metadata.artifactId}/content`, { headers: { cookie: ownerCookie } });
+  assert.equal(response.status, 200); assert.equal(response.headers.get("content-type"), "audio/wav");
+  assert.equal(response.headers.get("cache-control"), "private, no-store"); assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(response.headers.get("x-frame-options"), "DENY"); assert.deepEqual(Buffer.from(await response.arrayBuffer()), audio);
 });

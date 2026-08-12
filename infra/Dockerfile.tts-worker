@@ -1,0 +1,13 @@
+# syntax=docker/dockerfile:1.7
+FROM python:3.12.11-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/opt/courseforge/tts-worker/src
+WORKDIR /opt/courseforge/tts-worker
+COPY packages/tts-worker/src ./src
+
+# The generic image contains no TTS implementation and no weights. Deployments
+# mount a reviewed executable runner and a content-addressed model read-only.
+USER 65532:65532
+ENTRYPOINT ["python3", "-m", "courseforge_tts_worker.server"]

@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1.7
+# The Playwright 1.55.0 Ubuntu 24.04 image is pinned to its multi-architecture
+# registry digest. FFmpeg is supplied separately by Ubuntu; see the release gate below.
+FROM mcr.microsoft.com/playwright:v1.55.0-noble@sha256:b27e719ecbfef153e13fd24e8341736733bf2658b229677eb21ff57ff5d7fb29 AS build
+WORKDIR /workspace
+ENV NPM_CONFIG_REGISTRY=https://registry.npmjs.org
+COPY package.json package-lock.json tsconfig.base.json ./
+COPY packages/contracts/package.json ./packages/contracts/package.json
+COPY packages/media/package.json ./packages/media/package.json
+COPY packages/video-worker/package.json ./packages/video-worker/package.json
+RUN --mount=type=cache,id=courseforge-video-npm,target=/root/.npm,sharing=locked \
+    npm ci --ignore-scripts --no-audit --no-fund
+COPY packages/contracts ./packages/contracts
+COPY packages/media ./packages/media
+COPY packages/video-worker ./packages/video-worker
+RUN npm run build --workspace=@courseforge/contracts && \
+    npm run build --workspace=@courseforge/media && \
+    npm run build --workspace=@courseforge/video-worker && \
+    npm prune --omit=dev --ignore-scripts
+
+FROM mcr.microsoft.com/playwright:v1.55.0-noble@sha256:b27e719ecbfef153e13fd24e8341736733bf2658b229677eb21ff57ff5d7fb29 AS runtime
+ENV NODE_ENV=production \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    FFMPEG_PATH=/usr/bin/ffmpeg \
+    FFPROBE_PATH=/usr/bin/ffprobe
+WORKDIR /workspace
+# Distro package versions are captured by the release evidence script. The
+# digest-pinned base makes Chromium reproducible; rebuilds still require an
+# approved Ubuntu package snapshot because apt repositories can change.
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg dumb-init fonts-noto-cjk && rm -rf /var/lib/apt/lists/* && \
+    useradd --create-home --uid 10001 --shell /usr/sbin/nologin courseforge-video && \
+    mkdir -p /workspace /opt/courseforge && \
+    sha256sum /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc | cut -d' ' -f1 >/opt/courseforge/font-bundle.sha256 && \
+    chown -R courseforge-video:courseforge-video /workspace
+COPY --from=build --chown=courseforge-video:courseforge-video /workspace/package.json /workspace/package-lock.json ./
+COPY --from=build --chown=courseforge-video:courseforge-video /workspace/node_modules ./node_modules
+COPY --from=build --chown=courseforge-video:courseforge-video /workspace/packages/media/package.json ./packages/media/package.json
+COPY --from=build --chown=courseforge-video:courseforge-video /workspace/packages/media/dist ./packages/media/dist
+COPY --from=build --chown=courseforge-video:courseforge-video /workspace/packages/video-worker/package.json ./packages/video-worker/package.json
+COPY --from=build --chown=courseforge-video:courseforge-video /workspace/packages/video-worker/dist ./packages/video-worker/dist
+USER courseforge-video
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+CMD ["node", "packages/video-worker/dist/server.js"]

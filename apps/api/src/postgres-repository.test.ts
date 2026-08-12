@@ -134,6 +134,65 @@ test("PostgreSQL artifact metadata is parameterized and mapped without blob loca
   assert.deepEqual(sql.calls.at(-1)?.values, [PROJECT_ID]);
 });
 
+test("PostgreSQL artifact metadata batches commit atomically and roll back on failure", async () => {
+  const first = {
+    artifactId: ARTIFACT_ID, projectId: PROJECT_ID, jobId: JOB_ID, revision: 1,
+    configurationVersion: "config-v1", providerId: "deck-provider", kind: "deck-spec" as const,
+    mediaType: "application/json" as const, contentHash: "b".repeat(64), byteLength: 42,
+    sourceArtifactIds: [] as string[], createdAt: NOW
+  };
+  const second = { ...first, artifactId: `artifact-${"c".repeat(64)}`, kind: "render-manifest" as const, contentHash: "d".repeat(64) };
+
+  const success = new FakeSqlClient();
+  const transaction = { run: async <T>(operation: (client: SqlQueryClient) => Promise<T>) => { await success.query("BEGIN"); try { const value=await operation(success);await success.query("COMMIT");return value; } catch(error){await success.query("ROLLBACK");throw error;} } };
+  await new PostgresCourseForgeRepository(success,transaction).saveArtifactMetadataBatch([first, second]);
+  assert.equal(success.calls[0]?.text, "BEGIN");
+  assert.equal(success.calls.filter(({ text }) => text.startsWith("INSERT INTO artifacts")).length, 2);
+  assert.equal(success.calls.at(-1)?.text, "COMMIT");
+
+  const calls: string[] = [];
+  let inserts = 0;
+  const failing: SqlQueryClient = {
+    async query<Row>(text: string): Promise<SqlQueryResult<Row>> {
+      calls.push(text);
+      if (text.startsWith("INSERT INTO artifacts") && ++inserts === 2) throw new Error("fixture write failure");
+      return { rows: [], rowCount: 0 };
+    }
+  };
+  const failingTransaction={run:async<T>(operation:(client:SqlQueryClient)=>Promise<T>)=>{await failing.query("BEGIN");try{const value=await operation(failing);await failing.query("COMMIT");return value;}catch(error){await failing.query("ROLLBACK");throw error;}}};
+  await assert.rejects(
+    new PostgresCourseForgeRepository(failing,failingTransaction).saveArtifactMetadataBatch([first, second]),
+    /fixture write failure/
+  );
+  assert.equal(calls[0], "BEGIN");
+  assert.equal(calls.at(-1), "ROLLBACK");
+  assert.equal(calls.includes("COMMIT"), false);
+});
+
+test("PostgreSQL governed configuration and source records stay parameterized", async () => {
+  const sql = new FakeSqlClient();
+  const repository = new PostgresCourseForgeRepository(sql);
+  const config = {
+    schemaVersion: CONTRACT_VERSION, configId: AUDIT_ID, kind: "design" as const, providerId: "huashu-adapter",
+    version: "v1", displayName: "Design", capabilities: [], settings: {}, secretRefs: { credential: "env://DESIGN_CREDENTIAL" },
+    status: "draft" as const, createdAt: NOW, createdBy: USER_ID, publishedAt: null, inactiveAt: null
+  };
+  sql.responses.push({ rows: [], rowCount: 1 });
+  assert.equal(await repository.createProviderConfig(config), true);
+  assert.equal(sql.calls.at(-1)?.values?.[9], JSON.stringify(config.secretRefs));
+  assert.doesNotMatch(sql.calls.at(-1)?.text ?? "", /DESIGN_CREDENTIAL/);
+  const source = {
+    artifact: { schemaVersion: CONTRACT_VERSION, sourceArtifactId: AUDIT_ID, projectId: PROJECT_ID, displayName: "policy.md", createdAt: NOW, currentRevisionId: REQUEST_ID },
+    revision: { schemaVersion: CONTRACT_VERSION, sourceRevisionId: REQUEST_ID, sourceArtifactId: AUDIT_ID, revision: 1, filename: "policy.md", mediaType: "text/markdown" as const,
+      byteSize: 6, contentSha256: "c".repeat(64), importedAt: NOW, extractionMethod: "plain-text-v1" as const, sections: [{ schemaVersion: CONTRACT_VERSION, sectionId: `section-${"d".repeat(16)}`, ordinal: 0,
+        text: "policy", contentSha256: "e".repeat(64), locator: { schemaVersion: CONTRACT_VERSION, startLine: 1, endLine: 1, startOffset: 0, endOffset: 6 } }] },
+    normalizedText: "policy"
+  };
+  await repository.saveImportedSource(source);
+  assert.match(sql.calls.at(-1)?.text ?? "", /INSERT INTO source_revisions/);
+  assert.equal(sql.calls.at(-1)?.values?.[13], "policy");
+});
+
 test("administrator bootstrap is idempotent", async () => {
   const repository = new InMemoryCourseForgeRepository();
   await bootstrapAdministrator(repository, " Admin@Example.Test ", "correct horse battery staple");

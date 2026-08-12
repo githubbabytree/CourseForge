@@ -11,8 +11,8 @@ import {
   type SpeechRequest,
   type TTSProvider,
   type VoiceProfile,
-} from "./types.ts";
-import { assertRecord, endpoint, fetchWithTimeout, type FetchPort, readJsonResponse, silentLogger } from "./http.ts";
+} from "./types.js";
+import { assertRecord, endpoint, fetchWithTimeout, type FetchPort, readJsonResponse, silentLogger } from "./http.js";
 
 export interface TtsSidecarConfig {
   readonly id: string;

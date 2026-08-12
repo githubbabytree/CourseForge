@@ -1,4 +1,4 @@
-# Alpha container deployment
+# CourseForge v1.0.0 容器部署
 
 The checked-in stack is an acceptance topology, not an unattended production
 installer. Caddy is the only service with a host port. Web, API, PostgreSQL and
@@ -10,6 +10,7 @@ Copy `infra/.env.example` to an ignored `infra/.env` and replace every
 `change-me` / `replace-with` value. Keep the defaults below for loopback HTTP:
 
 - `COURSEFORGE_SITE_ADDRESS=:8080`
+- `COURSEFORGE_DEPLOYMENT_PROFILE=development`
 - `GATEWAY_BIND_ADDRESS=127.0.0.1`
 - `GATEWAY_PORT=8080`
 - `GATEWAY_CONTAINER_PORT=8080`
@@ -22,7 +23,7 @@ Run `docker compose --env-file infra/.env -f infra/compose.yaml up -d --build
 For an isolated clean-room test, run `scripts/container-smoke.sh`. It generates
 ephemeral credentials outside the repository, creates fresh named volumes,
 builds with the lockfile, checks health/version/login/project/generation, verifies
-migrations `001` and `002`, restarts PostgreSQL, MinIO and API, then reads the same
+every migration present in `apps/api/migrations`, verifies that metrics are private, exercises both text and isolated PDF ingestion, restarts PostgreSQL, MinIO and API, then reads the same
 artifact again. The temporary stack and volumes are removed unless
 `COURSEFORGE_KEEP_SMOKE_STACK=true` is explicitly set.
 
@@ -34,7 +35,8 @@ changing global Docker configuration, for example
 
 Before binding a non-loopback address, set all of the following together:
 
-- `COURSEFORGE_SITE_ADDRESS=training.example.corp` (a Caddy-supported HTTPS
+- `COURSEFORGE_DEPLOYMENT_PROFILE=production`
+- `COURSEFORGE_SITE_ADDRESS=https://training.example.corp` (a Caddy-supported HTTPS
   hostname whose DNS and certificate challenge reach the gateway)
 - `GATEWAY_BIND_ADDRESS=0.0.0.0`
 - `GATEWAY_PORT=443`
@@ -55,3 +57,8 @@ The production gate additionally requires a remote image build, healthy
 services, `/api/version` matching the intended revision, a protected browser/API
 smoke, backup/restore evidence, and rotation of any credential that has ever
 appeared in chat or logs.
+
+The API fails closed when the production profile or an HTTPS site address is
+combined with `SECURE_COOKIES=false`. See `production-operations.md` for the
+private Prometheus route, manifest-backed backup/restore drill and read-only
+capacity report.

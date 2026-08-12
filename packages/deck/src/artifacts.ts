@@ -16,6 +16,11 @@ export interface ArtifactContext {
   readonly createdAt?: string;
 }
 
+export interface DeckArtifactBuildContext extends ArtifactContext {
+  /** Immutable inputs used to derive the DeckSpec itself. */
+  readonly deckSourceArtifactIds?: readonly string[];
+}
+
 export interface ArtifactWriteRequest extends ArtifactContext {
   readonly kind: DeckArtifactKind;
   readonly mediaType: "application/json" | "text/html; charset=utf-8";
@@ -124,7 +129,7 @@ export interface DeckArtifactBundle {
  */
 export async function buildDeckArtifactBundle(
   input: DeckSpecV1,
-  context: ArtifactContext,
+  context: DeckArtifactBuildContext,
   store: ArtifactStore,
 ): Promise<DeckArtifactBundle> {
   const deck = DeckSpecV1Schema.parse(input);
@@ -134,17 +139,20 @@ export async function buildDeckArtifactBundle(
     kind: "deck-spec",
     mediaType: "application/json",
     content: canonicalJson(deck),
+    sourceArtifactIds: context.deckSourceArtifactIds,
   });
+
+  const imageUri = (assetId: string) => `/v1/projects/${encodeURIComponent(context.projectId)}/image-assets/${encodeURIComponent(assetId)}/content`;
 
   const revealHtml = await store.put({
     ...writeBase,
     kind: "reveal-html",
     mediaType: "text/html; charset=utf-8",
-    content: compileRevealHtml(mapDeckSpecV1(deck)),
+    content: compileRevealHtml(mapDeckSpecV1(deck, { assetUriForId: imageUri })),
     sourceArtifactIds: [deckSpec.artifactId],
   });
 
-  const manifest = createRenderManifest(mapDeckSpecV1(deck), {
+  const manifest = createRenderManifest(mapDeckSpecV1(deck, { assetUriForId: imageUri }), {
     renderId: `render-${deck.deckId}-r${deck.revision}`,
     deckRevision: String(deck.revision),
     deckUri: revealHtml.uri,
@@ -162,6 +170,6 @@ export async function buildDeckArtifactBundle(
 
 /** Adapter factory suitable for the workflow deck-stage provider's builder port. */
 export function createDeckArtifactBuilder(store: ArtifactStore) {
-  return (deck: DeckSpecV1, context: ArtifactContext): Promise<DeckArtifactBundle> =>
+  return (deck: DeckSpecV1, context: DeckArtifactBuildContext): Promise<DeckArtifactBundle> =>
     buildDeckArtifactBundle(deck, context, store);
 }

@@ -6,8 +6,8 @@ import {
   type SearchProvider,
   type SearchRequest,
   type SearchResult,
-} from "./types.ts";
-import { silentLogger } from "./http.ts";
+} from "./types.js";
+import { silentLogger } from "./http.js";
 
 export interface CommandResult {
   readonly exitCode: number;
@@ -27,6 +27,8 @@ export interface AgentReachSearchConfig {
   readonly timeoutMs?: number;
   readonly maxResults?: number;
   readonly maxOutputBytes?: number;
+  /** Fixed MCP selector exposed by Agent-Reach's Exa route. */
+  readonly tool?: "exa.web_search_exa";
 }
 
 const SAFE_EXECUTABLE = /^(?:[A-Za-z0-9._-]+|\/[A-Za-z0-9._/-]+)$/;
@@ -58,11 +60,11 @@ export class AgentReachSearchProvider implements SearchProvider {
   async probe(): Promise<ProviderHealth> {
     const checkedAt = new Date().toISOString();
     try {
-      const result = await this.runner.run(this.config.executable, ["doctor", "--json"], { timeoutMs: this.#timeoutMs });
+      const result = await this.runner.run(this.config.executable, ["list", "exa", "--output", "json"], { timeoutMs: this.#timeoutMs });
       if (result.exitCode !== 0) return { healthy: false, checkedAt, detail: `doctor exited with code ${result.exitCode}` };
       const parsed: unknown = JSON.parse(result.stdout);
       if (typeof parsed !== "object" || parsed === null) return { healthy: false, checkedAt, detail: "doctor returned an invalid response" };
-      return { healthy: true, checkedAt, detail: "doctor response accepted" };
+      return { healthy: true, checkedAt, detail: "Agent-Reach Exa route is available" };
     } catch (error) {
       this.#logger.warn("Agent-Reach capability probe failed", { providerId: this.metadata.id, errorType: error instanceof Error ? error.name : "unknown" });
       return { healthy: false, checkedAt, detail: "doctor invocation failed" };
@@ -79,7 +81,17 @@ export class AgentReachSearchProvider implements SearchProvider {
     if (domains.some((domain) => !SAFE_DOMAIN.test(domain))) {
       throw new ProviderAdapterError(`Provider ${this.metadata.id} received an invalid domain filter`, "invalid_configuration", this.metadata.id, false);
     }
-    const args = ["search", "--json", "--limit", String(limit), ...domains.flatMap((domain) => ["--domain", domain]), "--", query];
+    const scopedQuery = domains.length > 0 ? `${query} ${domains.map((domain) => `site:${domain}`).join(" ")}` : query;
+    const args = [
+      "call",
+      this.config.tool ?? "exa.web_search_exa",
+      "--args",
+      JSON.stringify({ query: scopedQuery, numResults: limit }),
+      "--output",
+      "json",
+      "--timeout",
+      String(this.#timeoutMs),
+    ];
     this.#logger.debug("Calling Agent-Reach", { providerId: this.metadata.id, operation: "search", limit, domainCount: domains.length });
     let command: CommandResult;
     try {
@@ -106,7 +118,7 @@ function parseSearchResults(stdout: string, providerId: string, limit: number): 
     ? value
     : typeof value === "object" && value !== null && Array.isArray((value as { results?: unknown }).results)
       ? (value as { results: unknown[] }).results
-      : undefined;
+      : mcpTextResults(value);
   if (!candidates) throw new ProviderAdapterError(`Provider ${providerId} returned an invalid search response`, "invalid_response", providerId, false);
   return candidates.slice(0, limit).map((candidate, index) => {
     if (typeof candidate !== "object" || candidate === null) throw new ProviderAdapterError(`Provider ${providerId} returned invalid result ${index}`, "invalid_response", providerId, false);
@@ -119,6 +131,24 @@ function parseSearchResults(stdout: string, providerId: string, limit: number): 
       throw new ProviderAdapterError(`Provider ${providerId} returned an invalid result URL`, "invalid_response", providerId, false, undefined, { cause });
     }
     if (!/^https?:$/.test(url.protocol) || url.username || url.password) throw new ProviderAdapterError(`Provider ${providerId} returned a non-HTTP or credential-bearing result URL`, "invalid_response", providerId, false);
-    return { title: item.title, url: url.toString(), snippet: item.snippet, ...(typeof item.publishedAt === "string" ? { publishedAt: item.publishedAt } : {}) };
+    let imageUrl: string | undefined;
+    if (typeof item.imageUrl === "string") { const parsed = new URL(item.imageUrl); if (parsed.protocol !== "https:" || parsed.username || parsed.password) throw new ProviderAdapterError(`Provider ${providerId} returned an invalid image URL`, "invalid_response", providerId, false); imageUrl = parsed.toString(); }
+    return { title: item.title, url: url.toString(), snippet: item.snippet, ...(typeof item.publishedAt === "string" ? { publishedAt: item.publishedAt } : {}), ...(imageUrl ? { imageUrl } : {}) };
+  });
+}
+
+function mcpTextResults(value: unknown): unknown[] | undefined {
+  if (typeof value !== "object" || value === null || !Array.isArray((value as { content?: unknown }).content)) return undefined;
+  const text = (value as { content: Array<{ type?: unknown; text?: unknown }> }).content
+    .filter((item) => item.type === "text" && typeof item.text === "string")
+    .map((item) => item.text as string)
+    .join("\n---\n");
+  if (!text.trim()) return [];
+  return text.split(/\n\s*---\s*\n/g).map((block) => {
+    const title = block.match(/^Title:\s*(.+)$/m)?.[1]?.trim();
+    const url = block.match(/^URL:\s*(.+)$/m)?.[1]?.trim();
+    const published = block.match(/^Published:\s*(.+)$/m)?.[1]?.trim();
+    const highlights = block.split(/^Highlights:\s*$/m)[1]?.trim() ?? "";
+    return { title, url, snippet: highlights.slice(0, 5_000), ...(published && published !== "N/A" ? { publishedAt: published } : {}) };
   });
 }

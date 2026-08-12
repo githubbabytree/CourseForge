@@ -30,7 +30,7 @@ CourseForge 面向大型互联网公司内部信息安全培训，将点子、�
 
 - Web：向导、编辑器、Reveal 预览、AI 对话、版本 diff、任务进度与管理后台。
 - API：本地账号、RBAC、项目、revision、Provider/Prompt 配置、任务、产物和审计 API。
-- Workflow：阶段 DAG、检查点、重试、取消、幂等和脏页增量构建；Alpha 先保持清晰端口，生产再接 Durable Workflow 实现。
+- Workflow：阶段 DAG、检查点、重试、取消、幂等和脏页增量构建；v1.0 已接入 PostgreSQL lease queue，Temporal 保留为可选适配器。
 - PostgreSQL：用户、会话、项目、成员、配置、revision、任务元数据和审计。
 - 对象存储：源文件、标准化素材、WebPPT、音频、字幕、分段视频和最终 MP4。
 - Worker：研究、Deck、TTS、Render 分池限流，任务容器无特权并有 CPU、内存、磁盘、时长与并发配额。
@@ -94,7 +94,7 @@ Huashu Design 作为版本锁定的设计工作流和规则包接入，不作为
 
 ## 6. 优先级与里程碑
 
-### P0：内部 Alpha 纵向链
+### P0：内部验证纵向链（历史里程碑，已完成）
 
 - 登录/RBAC/审计、项目与 Brief、真实进度、PostgreSQL。
 - 唯一 DeckSpec、Reveal HTML、备注和 RenderManifest。
@@ -141,4 +141,4 @@ Huashu Design 作为版本锁定的设计工作流和规则包接入，不作为
 
 ## 8. 当前实现映射
 
-截至内部 Alpha，本地代码已经覆盖认证/RBAC、PostgreSQL、MinIO artifact、九阶段进度、安全 Provider 边界、TXT/Markdown SourceRevision、Prompt 版本治理、Deck 三类真实 artifact，以及固定版本、自托管、沙箱化的交互式 Reveal 预览；Caddy 是容器拓扑唯一入口。真实模型调用、联网检索、PDF/PPTX、Huashu 执行、TTS 音频、视频渲染和持久化任务队列仍未启用，也不得在 UI 或发布说明中表示为完成。实时状态以 `docs/implementation-status.md` 为准。
+截至 v1.0.0，代码已覆盖认证/RBAC、PostgreSQL/MinIO、可恢复任务队列、TXT/Markdown/PDF/DOCX/PPTX 安全导入、受治理的真实模型与 Agent-Reach 边界、Huashu adapter、显式设计方向/模板、Reveal WebPPT、讲稿修订、TTS sidecar 协议、字幕、确定性视频 worker、QA/发布/撤回和可复现交付包。真实 Huashu 服务、TTS 权重及中文盲听、目标 CPU 基准、Chromium/FFmpeg 容器渲染、备份恢复演练和生产 HTTPS 仍是目标环境验收门；不得仅凭单元测试表示这些门已通过。实时状态以 `docs/implementation-status.md` 为准。

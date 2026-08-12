@@ -1,18 +1,24 @@
 {
   "name": "courseforge",
-  "version": "0.2.0-alpha.2",
+  "version": "1.0.0",
   "private": true,
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
-    "build:foundations": "npm run build --workspace=@courseforge/contracts && npm run build --workspace=@courseforge/deck && npm run build --workspace=@courseforge/workflow",
+    "build": "npm run build:foundations && npm run build --workspace=@courseforge/api && npm run build --workspace=@courseforge/web",
+    "build:foundations": "npm run build --workspace=@courseforge/contracts && npm run build --workspace=@courseforge/ingestion && npm run build --workspace=@courseforge/document-worker && npm run build --workspace=@courseforge/media && npm run build --workspace=@courseforge/video-worker && npm run build --workspace=@courseforge/tts-worker && npm run build --workspace=@courseforge/deck && npm run build --workspace=@courseforge/providers && npm run build --workspace=@courseforge/workflow",
     "dev": "npm run dev --workspace=@courseforge/web",
     "check:secrets": "node scripts/check-secrets.mjs",
     "check:version": "node scripts/check-version.mjs",
+    "check:ops": "bash -n scripts/backup.sh scripts/restore.sh scripts/capacity-report.sh scripts/container-smoke.sh && node --test scripts/ops-scripts.test.mjs",
     "prepare": "node scripts/install-git-hooks.mjs",
-    "test": "npm run test --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present",
-    "verify": "npm run build:foundations && npm run check:secrets && npm run check:version && npm run typecheck && npm test && npm run build"
+    "test": "npm run build:foundations && npm run test --workspaces --if-present",
+    "typecheck": "npm run build:foundations && npm run typecheck --workspaces --if-present",
+    "verify": "npm run build:foundations && npm run check:secrets && npm run check:version && npm run check:ops && npm run typecheck && npm test && npm run build"
   },
-  "engines": { "node": ">=22" }
+  "engines": {
+    "node": ">=22"
+  }
 }

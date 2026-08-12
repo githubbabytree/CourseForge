@@ -1,0 +1,2 @@
+CREATE TABLE design_template_versions(template_id UUID PRIMARY KEY,name TEXT NOT NULL,version TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN('draft','published','inactive')),content_hash TEXT NOT NULL,document JSONB NOT NULL,created_at TIMESTAMPTZ NOT NULL,created_by UUID NOT NULL REFERENCES users(user_id),published_at TIMESTAMPTZ,inactive_at TIMESTAMPTZ,UNIQUE(name,version));
+CREATE UNIQUE INDEX design_template_one_published ON design_template_versions(name) WHERE status='published';

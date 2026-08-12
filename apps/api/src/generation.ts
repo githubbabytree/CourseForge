@@ -14,10 +14,10 @@ import { persistDeckArtifactBundle, type ArtifactBlobStore } from "./artifacts.j
 import type { CourseForgeRepository } from "./repositories.js";
 
 /**
- * Internal-alpha executor that makes the deck stage truthful while retaining
+ * Development/demo executor that makes the deck stage truthful while retaining
  * deterministic fixtures for stages whose real providers are not enabled.
  */
-export class AlphaArtifactStageExecutor implements StageExecutor {
+export class DevelopmentArtifactStageExecutor implements StageExecutor {
   readonly #fallback = new DeterministicDemoStageExecutor();
 
   constructor(
@@ -27,8 +27,8 @@ export class AlphaArtifactStageExecutor implements StageExecutor {
 
   cacheKey(input: Omit<StageExecutionInput, "jobId" | "previousArtifactHash">): string {
     return input.stage === "deck"
-      ? `alpha-deck-v1:${input.projectId}`
-      : `alpha-fixture-v1:${input.projectId}:${input.stage}`;
+      ? `development-deck-v1:${input.projectId}`
+      : `development-fixture-v1:${input.projectId}:${input.stage}`;
   }
 
   async execute(input: StageExecutionInput): Promise<StageExecutionResult> {
@@ -38,7 +38,7 @@ export class AlphaArtifactStageExecutor implements StageExecutor {
 
     const sourceStore: GeneratedArtifactStore = new InMemoryArtifactStore();
     const provider = new DeterministicDeckStageProvider(
-      "alpha-deck-config-v1",
+      "development-deck-config-v1",
       {
         title: project.brief.title,
         audience: project.brief.audience,

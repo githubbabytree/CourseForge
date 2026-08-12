@@ -85,7 +85,7 @@ const SECRET_PATTERNS: readonly RegExp[] = [
   /\b(?:api[_-]?key|access[_-]?token|client[_-]?secret|password)\s*[:=]\s*["']?[A-Za-z0-9_./+=-]{12,}["']?/iu
 ];
 
-function assertSafeText(text: string): void {
+export function assertSafeSourceText(text: string): void {
   if (/\u0000/u.test(text) || /[\u0001-\u0008\u000b\u000c\u000e-\u001f]/u.test(text)) {
     throw new IngestionError("unsafe_content", "source contains unsupported control characters");
   }
@@ -160,7 +160,7 @@ export function importTextSource(input: ImportTextSourceInput): ImportedTextSour
   if (normalizedText.trim().length === 0) {
     throw new IngestionError("empty_content", "source must contain non-whitespace text");
   }
-  assertSafeText(normalizedText);
+  assertSafeSourceText(normalizedText);
   const sections = extractSections(normalizedText);
   if (sections.length === 0) {
     throw new IngestionError("empty_content", "source did not contain an extractable section");
@@ -233,3 +233,9 @@ export function validateMaterialWithSources(value: unknown, revisions: readonly 
   }
   return material;
 }
+
+export * from "./pptx.js";
+
+export * from "./docx.js";
+
+export * from "./pdf.js";

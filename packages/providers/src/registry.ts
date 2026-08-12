@@ -1,4 +1,4 @@
-import type { BaseProvider, ProviderByKind, ProviderKind } from "./types.ts";
+import type { BaseProvider, ProviderByKind, ProviderKind } from "./types.js";
 
 export class DuplicateProviderError extends Error {}
 export class ProviderNotFoundError extends Error {}

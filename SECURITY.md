@@ -1,18 +1,20 @@
-# Security policy
+# 安全策略
 
-CourseForge handles internal training material and external AI providers. Do not commit credentials, access tokens, cookies, private source documents, generated artifacts, or production configuration.
+CourseForge 会处理内部培训材料并连接外部 AI Provider。严禁提交凭据、访问令牌、Cookie、私钥、内部源文档、生成产物或生产配置。
 
-## Provider secrets
+## Provider 密钥
 
-- Application configuration stores a `secretRef`, never the secret value.
-- Secret values are injected at runtime and must be redacted from HTTP responses, workflow payloads, logs, traces, and audit events.
-- A secret shown in chat, an issue, a commit, or a log is considered compromised and must be revoked and rotated.
+- 应用配置只保存 `secretRef`，不得保存密钥值。
+- 密钥仅在运行时注入，并且必须从 HTTP 响应、任务载荷、日志、链路和审计事件中移除。
+- 任何曾出现在聊天、Issue、提交或日志中的密钥均视为已泄露，必须撤销并轮换。
 
-## Generated content
+## 生成内容
 
-- Treat imported documents and fetched webpages as untrusted data.
-- Preview generated decks in a sandboxed origin with a strict CSP.
-- Final rendering runs without external network access and without application credentials.
-- Preserve source, license, retrieval time, and content hashes for external assets.
+- 将导入文档和抓取网页视为不可信数据。
+- 使用隔离 iframe 和严格 CSP 预览生成的课件。
+- 最终渲染必须断开外网，且不得携带应用凭据。
+- 外部素材必须保留来源、许可、获取时间和内容哈希。
 
-Report vulnerabilities privately to the repository owner. Do not include production data or credentials in a report.
+## 漏洞报告
+
+请私下向仓库所有者报告漏洞。报告中不得包含生产数据或任何凭据，也不要在公开 Issue 中披露可利用细节。

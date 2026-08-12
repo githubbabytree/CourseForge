@@ -1,4 +1,4 @@
-import { ProviderAdapterError, type ProviderLogger } from "./types.ts";
+import { ProviderAdapterError, type ProviderLogger } from "./types.js";
 
 export type FetchPort = (input: string | URL, init?: RequestInit) => Promise<Response>;
 

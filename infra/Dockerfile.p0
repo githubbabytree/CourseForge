@@ -13,6 +13,10 @@ COPY apps/web/package.json ./apps/web/package.json
 COPY packages/contracts/package.json ./packages/contracts/package.json
 COPY packages/deck/package.json ./packages/deck/package.json
 COPY packages/ingestion/package.json ./packages/ingestion/package.json
+COPY packages/document-worker/package.json ./packages/document-worker/package.json
+COPY packages/media/package.json ./packages/media/package.json
+COPY packages/video-worker/package.json ./packages/video-worker/package.json
+COPY packages/tts-worker/package.json ./packages/tts-worker/package.json
 COPY packages/providers/package.json ./packages/providers/package.json
 COPY packages/workflow/package.json ./packages/workflow/package.json
 RUN --mount=type=cache,id=courseforge-npm,target=/root/.npm,sharing=locked \
@@ -20,7 +24,13 @@ RUN --mount=type=cache,id=courseforge-npm,target=/root/.npm,sharing=locked \
 COPY apps ./apps
 COPY packages ./packages
 RUN npm run build --workspace=@courseforge/contracts && \
+    npm run build --workspace=@courseforge/ingestion && \
+    npm run build --workspace=@courseforge/document-worker && \
+    npm run build --workspace=@courseforge/media && \
+    npm run build --workspace=@courseforge/video-worker && \
+    npm run build --workspace=@courseforge/tts-worker && \
     npm run build --workspace=@courseforge/deck && \
+    npm run build --workspace=@courseforge/providers && \
     npm run build --workspace=@courseforge/workflow && \
     npm run build
 
@@ -33,10 +43,21 @@ COPY --from=build /workspace/apps/api/dist ./apps/api/dist
 COPY --from=build /workspace/apps/api/migrations ./apps/api/migrations
 COPY --from=build /workspace/packages/contracts/package.json ./packages/contracts/package.json
 COPY --from=build /workspace/packages/contracts/dist ./packages/contracts/dist
+COPY --from=build /workspace/packages/ingestion/package.json ./packages/ingestion/package.json
+COPY --from=build /workspace/packages/ingestion/dist ./packages/ingestion/dist
+COPY --from=build /workspace/packages/document-worker/package.json ./packages/document-worker/package.json
+COPY --from=build /workspace/packages/document-worker/dist ./packages/document-worker/dist
+COPY --from=build /workspace/packages/media/package.json ./packages/media/package.json
+COPY --from=build /workspace/packages/media/dist ./packages/media/dist
+COPY --from=build /workspace/packages/video-worker/package.json ./packages/video-worker/package.json
+COPY --from=build /workspace/packages/video-worker/dist ./packages/video-worker/dist
+COPY --from=build /workspace/packages/providers/package.json ./packages/providers/package.json
+COPY --from=build /workspace/packages/providers/dist ./packages/providers/dist
 COPY --from=build /workspace/packages/workflow/package.json ./packages/workflow/package.json
 COPY --from=build /workspace/packages/workflow/dist ./packages/workflow/dist
 COPY --from=build /workspace/packages/deck/package.json ./packages/deck/package.json
 COPY --from=build /workspace/packages/deck/dist ./packages/deck/dist
+COPY --from=build /workspace/packages/deck/static ./packages/deck/static
 COPY --from=build /workspace/apps/web/.next ./apps/web/.next
 COPY --from=build /workspace/apps/web/.next/static ./apps/web/.next/standalone/apps/web/.next/static
 COPY --from=build /workspace/apps/web/package.json ./apps/web/package.json

@@ -1,0 +1,7 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { PublishedCourseV1Schema } from "@courseforge/contracts";
+import { InMemoryCourseForgeRepository } from "./repositories.js";
+
+const base={schemaVersion:"1" as const,publishedCourseId:"11111111-1111-4111-8111-111111111111",projectId:"22222222-2222-4222-8222-222222222222",revision:1,qaReportArtifactId:`artifact-${"a".repeat(64)}`,deckArtifactId:`artifact-${"b".repeat(64)}`,speechManifestArtifactId:`artifact-${"c".repeat(64)}`,videoManifestArtifactId:`artifact-${"d".repeat(64)}`,mp4ArtifactId:`artifact-${"e".repeat(64)}`,approvalArtifactIds:[`artifact-${"1".repeat(64)}`,`artifact-${"2".repeat(64)}`,`artifact-${"3".repeat(64)}`],publishedAt:new Date().toISOString(),publishedBy:"33333333-3333-4333-8333-333333333333"};
+test("publication allocation rejects duplicate QA and concurrent release revision",async()=>{const repository=new InMemoryCourseForgeRepository();const first=PublishedCourseV1Schema.parse(base);const second=PublishedCourseV1Schema.parse({...base,publishedCourseId:"44444444-4444-4444-8444-444444444444",qaReportArtifactId:`artifact-${"f".repeat(64)}`});const outcomes=await Promise.all([repository.createPublication(first,`artifact-${"4".repeat(64)}`),repository.createPublication(second,`artifact-${"5".repeat(64)}`)]);assert.equal(outcomes.filter(Boolean).length,1);assert.equal((await repository.listPublications(base.projectId)).length,1);assert.equal(await repository.createPublication(first,`artifact-${"4".repeat(64)}`),false);});

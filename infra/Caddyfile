@@ -12,6 +12,9 @@
 		Referrer-Policy "no-referrer"
 	}
 
+	# Metrics stay on the private API network and are never gateway-exposed.
+	respond /api/metrics 404
+
 	reverse_proxy web:3000 {
 		health_uri /api/ready
 		health_interval 10s

@@ -84,18 +84,18 @@ test("Agent-Reach adapter uses fixed argv allowlist and validates search output"
   const runner: CommandRunner = {
     run: async (executable, args) => {
       calls.push({ executable, args });
-      if (args[0] === "doctor") return { exitCode: 0, stdout: JSON.stringify({ status: "ok" }), stderr: "" };
-      return { exitCode: 0, stdout: JSON.stringify({ results: [{ title: "Result", url: "https://example.invalid/a", snippet: "Evidence" }] }), stderr: "" };
+      if (args[0] === "list") return { exitCode: 0, stdout: JSON.stringify({ tools: ["web_search_exa"] }), stderr: "" };
+      return { exitCode: 0, stdout: JSON.stringify({ content: [{ type: "text", text: "Title: Result\nURL: https://example.invalid/a\nPublished: N/A\nAuthor: N/A\nHighlights:\nEvidence" }] }), stderr: "" };
     },
   };
-  const provider = new AgentReachSearchProvider({ executable: "agent-reach", allowedExecutables: ["agent-reach"] }, runner);
+  const provider = new AgentReachSearchProvider({ executable: "mcporter", allowedExecutables: ["mcporter"] }, runner);
   assert.equal((await provider.probe()).healthy, true);
   const results = await provider.search({ query: "training; touch /tmp/nope", limit: 3, allowedDomains: ["example.invalid"] }, context);
   assert.equal(results.length, 1);
-  assert.equal(calls[1]?.executable, "agent-reach");
-  assert.deepEqual(calls[1]?.args.slice(0, 4), ["search", "--json", "--limit", "3"]);
-  assert.equal(calls[1]?.args.at(-1), "training; touch /tmp/nope");
-  assert.throws(() => new AgentReachSearchProvider({ executable: "sh", allowedExecutables: ["agent-reach"] }, runner), /allowlisted/);
+  assert.equal(calls[1]?.executable, "mcporter");
+  assert.deepEqual(calls[1]?.args.slice(0, 3), ["call", "exa.web_search_exa", "--args"]);
+  assert.match(calls[1]?.args[3] ?? "", /training; touch \/tmp\/nope site:example\.invalid/);
+  assert.throws(() => new AgentReachSearchProvider({ executable: "sh", allowedExecutables: ["mcporter"] }, runner), /allowlisted/);
 });
 
 test("TTS sidecar maps metadata and sentence manifest uses measured durations", async () => {

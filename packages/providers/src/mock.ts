@@ -27,7 +27,7 @@ import type {
   VideoRendererProvider,
   VideoRenderRequest,
   VoiceProfile,
-} from "./types.ts";
+} from "./types.js";
 
 const healthy = async (): Promise<ProviderHealth> => ({
   healthy: true,
