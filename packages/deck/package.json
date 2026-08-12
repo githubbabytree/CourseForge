@@ -1,6 +1,6 @@
 {
   "name": "@courseforge/deck",
-  "version": "0.2.0-alpha.1",
+  "version": "0.2.0-alpha.2",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
@@ -17,7 +17,7 @@
     "typecheck": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@courseforge/contracts": "0.2.0-alpha.1"
+    "@courseforge/contracts": "0.2.0-alpha.2"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

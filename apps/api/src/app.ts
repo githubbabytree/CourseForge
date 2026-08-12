@@ -36,7 +36,7 @@ import {
 } from "./artifacts.js";
 import { AlphaArtifactStageExecutor } from "./generation.js";
 
-export const API_VERSION = "0.2.0-alpha.1";
+export const API_VERSION = "0.2.0-alpha.2";
 const SESSION_COOKIE_NAME = "courseforge_session";
 const SESSION_TTL_MS = 8 * 60 * 60 * 1_000;
 
