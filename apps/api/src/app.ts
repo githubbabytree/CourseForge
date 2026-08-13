@@ -89,7 +89,7 @@ import { BUSINESS_PROMPT_KEYS, PROMPT_DEFINITION_CATALOG, initializeMissingPromp
 import { RuntimeNotReadyError, assertRuntimeReady, evaluateRuntimeReadiness, type ReadinessStage } from "./runtime-readiness.js";
 import { confirmVisualReview, createStyleProfile, createVisualReview, latestVisualReview } from "./visual-review.js";
 
-export const API_VERSION = "1.1.1";
+export const API_VERSION = "1.1.2";
 const SESSION_COOKIE_NAME = "courseforge_session";
 const SESSION_TTL_MS = 8 * 60 * 60 * 1_000;
 

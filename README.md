@@ -67,6 +67,7 @@ docker compose --env-file infra/.env -f infra/compose.yaml up -d --build --wait
 - 升级部署时同步更新被忽略的 `infra/.env` 中的 `COURSEFORGE_VERSION=v1.1.1`（`/api/version` 的 `deploymentRevision` 与目标版本保持一致），并确认 Compose 项目名不变，避免数据卷隔离。
 - 首次启动后，在管理台「Prompts」页发布十个业务 Prompt 草稿（缺失项可直接点「创建草稿」），并按需创建发布 QA Policy、发音词典与设计模板，配置并发布六类 Provider（发布后须通过真实能力探针）。
 - 全部发布后在「就绪度」页点「创建当前快照」，重新检查即可看到 `course-full 可以启动`。旧空快照按设计只读保留、不可运行。
+- v1.1.2 起，QA Policy/发音词典/设计模板的发布与停用操作已修复（此前返回 500），升级后即可正常执行。
 
 详细运维要求见[生产运维](docs/production-operations.md)，实际能力边界见[实现状态](docs/implementation-status.md)，目标主机交接步骤见[中文部署交接](docs/operator-deployment-handoff.zh-CN.md)。
 
