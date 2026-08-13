@@ -57,6 +57,15 @@ export interface PromptVersion extends CreatePromptVersionInput {
   inactiveAt: string | null;
 }
 
+export interface PromptCatalogDefinition {
+  promptKey:string; purpose:string; stage:string; editable:boolean; allowedVariables:string[];
+  responseSchema:Record<string,unknown>; status:"missing"|"configured"|"built-in";
+  versions:Array<{promptVersionId:string;version:string;status:ConfigurationStatus;contentHash:string}>;
+  defaultTemplate?:string;
+}
+export interface RuntimeReadinessItem {component:string;key:string;ready:boolean;code:string;detail:string}
+export interface RuntimeReadiness {profile:"course-full";snapshotId:string|null;runnable:boolean;status:"runnable"|"not_runnable";checkedAt:string;items:RuntimeReadinessItem[];missing:RuntimeReadinessItem[]}
+
 export interface RuntimeConfigSnapshot {
   snapshotId: string;
   capturedAt: string;
@@ -250,6 +259,9 @@ export interface CourseClient {
   listPromptVersions(): Promise<PromptVersion[]>;
   createPromptVersion(input: CreatePromptVersionInput): Promise<PromptVersion>;
   transitionPromptVersion(promptVersionId: string, operation: "publish" | "deactivate"): Promise<PromptVersion>;
+  getPromptCatalog():Promise<PromptCatalogDefinition[]>;
+  initializeMissingPrompts(input:{version:string;dryRun:boolean}):Promise<{dryRun:boolean;missing?:Array<{promptKey:string}>;created?:PromptVersion[]}>;
+  getRuntimeReadiness(snapshotId?:string):Promise<RuntimeReadiness>;
   captureRuntimeConfigSnapshot(): Promise<RuntimeConfigSnapshot>;
   getRuntimeConfigSnapshot(snapshotId: string): Promise<RuntimeConfigSnapshot>;
   listRuntimeConfigSnapshots(page?:number,pageSize?:number):Promise<Page<RuntimeConfigSnapshot>>;
@@ -497,6 +509,9 @@ class HttpCourseClient implements CourseClient {
   async listPromptVersions() { const payload = await this.request("/v1/admin/prompt-versions") as { prompts?: unknown[] }; return (payload.prompts ?? []).map(asPromptVersion); }
   async createPromptVersion(input: CreatePromptVersionInput) { return asPromptVersion(await this.request("/v1/admin/prompt-versions", { method: "POST", body: JSON.stringify(input) })); }
   async transitionPromptVersion(promptVersionId: string, operation: "publish" | "deactivate") { return asPromptVersion(await this.request(`/v1/admin/prompt-versions/${encodeURIComponent(promptVersionId)}/${operation}`, { method: "POST" })); }
+  async getPromptCatalog(){const value=await this.request("/v1/admin/prompt-catalog") as {definitions:PromptCatalogDefinition[]};return value.definitions;}
+  async initializeMissingPrompts(input:{version:string;dryRun:boolean}){return this.request("/v1/admin/prompt-catalog/initialize",{method:"POST",body:JSON.stringify(input)}) as Promise<{dryRun:boolean;missing?:Array<{promptKey:string}>;created?:PromptVersion[]}>;}
+  async getRuntimeReadiness(snapshotId?:string){return this.request(`/v1/admin/runtime-readiness?profile=course-full${snapshotId?`&snapshotId=${encodeURIComponent(snapshotId)}`:""}`) as Promise<RuntimeReadiness>;}
   async captureRuntimeConfigSnapshot() { return asRuntimeConfigSnapshot(await this.request("/v1/admin/runtime-config-snapshots", { method: "POST" })); }
   async getRuntimeConfigSnapshot(snapshotId: string) { return asRuntimeConfigSnapshot(await this.request(`/v1/admin/runtime-config-snapshots/${encodeURIComponent(snapshotId)}`)); }
   async listRuntimeConfigSnapshots(page=1,pageSize=25){const payload=await this.request(`/v1/admin/runtime-config-snapshots?page=${page}&pageSize=${pageSize}`) as {items?:unknown[];total?:number;page?:number;pageSize?:number};return{items:(payload.items??[]).map(asRuntimeConfigSnapshot),total:Number(payload.total??0),page:Number(payload.page??page),pageSize:Number(payload.pageSize??pageSize)};}
@@ -646,6 +661,9 @@ class DemoCourseClient implements CourseClient {
   async listPromptVersions(): Promise<PromptVersion[]> { throw new CourseClientError("演示模式不读取提示词配置"); }
   async createPromptVersion(): Promise<PromptVersion> { throw new CourseClientError("演示模式不写入提示词配置"); }
   async transitionPromptVersion(): Promise<PromptVersion> { throw new CourseClientError("演示模式不写入提示词配置"); }
+  async getPromptCatalog():Promise<PromptCatalogDefinition[]>{return[];}
+  async initializeMissingPrompts():Promise<{dryRun:boolean}>{throw new CourseClientError("演示模式不初始化提示词");}
+  async getRuntimeReadiness():Promise<RuntimeReadiness>{throw new CourseClientError("演示模式不读取运行就绪度");}
   async captureRuntimeConfigSnapshot(): Promise<RuntimeConfigSnapshot> { throw new CourseClientError("演示模式不创建运行快照"); }
   async listQaPolicyVersions():Promise<QaPolicyVersion[]>{throw new CourseClientError("演示模式不读取 QA Policy");}
   async createQaPolicyVersion():Promise<QaPolicyVersion>{throw new CourseClientError("演示模式不创建 QA Policy");}

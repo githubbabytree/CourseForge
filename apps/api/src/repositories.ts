@@ -4,6 +4,7 @@ import type {
   , PublishedCourseV1, PublicationWithdrawalV1, ArtifactTombstoneV1, ArtifactGcPlanV1
 } from "@courseforge/contracts";
 import type { ArtifactMetadataRecord } from "./artifacts.js";
+import { promptContentHash } from "./prompt-catalog.js";
 
 export interface StoredUser extends SessionUserV1 {
   passwordHash: string;
@@ -250,7 +251,7 @@ export class InMemoryCourseForgeRepository implements CourseForgeRepository {
     const snapshot: RuntimeConfigSnapshotRecordV1 = {
       schemaVersion: "1", snapshotId, capturedAt, capturedBy,
       providerBindings: [...this.providerConfigs.values()].filter((item) => item.status === "published").map((item) => ({ kind: item.kind, configId: item.configId, providerId: item.providerId, version: item.version })),
-      promptBindings: [...this.promptVersions.values()].filter((item) => item.status === "published").map((item) => ({ promptKey: item.promptKey, promptVersionId: item.promptVersionId, version: item.version })), pronunciationLexiconBinding:null,
+      promptBindings: [...this.promptVersions.values()].filter((item) => item.status === "published").map((item) => ({ promptKey: item.promptKey, promptVersionId: item.promptVersionId, version: item.version, contentHash: promptContentHash(item) })), pronunciationLexiconBinding:null,
       qaPolicyBinding:qaPolicy?{qaPolicyId:qaPolicy.qaPolicyId,version:qaPolicy.version,contentHash:qaPolicy.contentHash}:null
     };
     this.configSnapshots.set(snapshotId, structuredClone(snapshot)); return snapshot;

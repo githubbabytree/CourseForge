@@ -6,7 +6,7 @@ import type { StageExecutionInput, StageExecutionResult, StageExecutor } from "@
 import { persistBinaryArtifact, type ArtifactBlobStore, type ArtifactMetadataRecord } from "./artifacts.js";
 import { EnvironmentSecretResolver } from "./provider-runtime.js";
 import type { CourseForgeRepository } from "./repositories.js";
-import { findImageAsset } from "./image-assets.js";
+import { findImageAsset, inspectSafeImage } from "./image-assets.js";
 
 const sha256 = (value: string | Uint8Array) => createHash("sha256").update(value).digest("hex");
 const artifactRef = (bucket: string, artifactId: string) => `s3://${bucket}/artifacts/${artifactId}`;
@@ -99,6 +99,7 @@ export class PersistedVideoExecutor implements StageExecutor {
     const renderInputArtifact = await persistBinaryArtifact({ repository: this.repository, blobStore: this.blobStore, projectId: input.projectId, jobId: input.jobId,
       configurationVersion: this.snapshotId, providerId: this.config.providerId, kind: "video-render-input", mediaType: "application/json",
       content: Buffer.from(JSON.stringify(renderInput), "utf8"), sourceArtifactIds: [...sourceArtifactIds, ...segments.map((segment) => segment.audioArtifactId)] });
+    const slideResponses=await this.provider.renderSlides(renderInput,{runId:input.jobId,projectId:input.projectId,configurationVersion:this.snapshotId});if(slideResponses.length!==segments.length||slideResponses.some((slide,index)=>slide.slideId!==segments[index]!.slideId))throw new Error("Rendered slide sequence does not match the Deck");const slideRenderArtifacts=[];for(const [index,slide]of slideResponses.entries()){const dimensions=await inspectSafeImage(slide.bytes,"image/png");if(dimensions.width!==1920||dimensions.height!==1080)throw new Error("Rendered slide dimensions are invalid");const artifact=await persistBinaryArtifact({repository:this.repository,blobStore:this.blobStore,projectId:input.projectId,jobId:input.jobId,configurationVersion:this.snapshotId,providerId:this.config.providerId,kind:"slide-render-png",mediaType:"image/png",content:slide.bytes,sourceArtifactIds:[this.artifacts.deck.artifactId,this.artifacts.reveal.artifactId],revision:index+1});slideRenderArtifacts.push(artifact);}
     const video = await this.provider.renderBinary(renderInput, { runId: input.jobId, projectId: input.projectId, configurationVersion: this.snapshotId });
     if (!video.bytes || video.mediaType !== "video/mp4" || !video.provenance) throw new Error("Rendered video response is incomplete");
     const actualFrameCount = video.frameCount;
@@ -121,7 +122,7 @@ export class PersistedVideoExecutor implements StageExecutor {
     });
     const manifestArtifact = await persistBinaryArtifact({ repository: this.repository, blobStore: this.blobStore, projectId: input.projectId, jobId: input.jobId,
       configurationVersion: this.snapshotId, providerId: this.config.providerId, kind: "video-manifest", mediaType: "application/json",
-      content: Buffer.from(JSON.stringify(manifest), "utf8"), sourceArtifactIds: [...sourceArtifactIds, renderInputArtifact.artifactId, mp4Artifact.artifactId], createdAt });
+      content: Buffer.from(JSON.stringify(manifest), "utf8"), sourceArtifactIds: [...sourceArtifactIds, renderInputArtifact.artifactId, ...slideRenderArtifacts.map(artifact=>artifact.artifactId), mp4Artifact.artifactId], createdAt });
     return { artifactHash: manifestArtifact.contentHash };
   }
 }
@@ -131,7 +132,7 @@ export async function createPersistedVideoExecutor(repository: CourseForgeReposi
   const binding = snapshot?.providerBindings.find((item) => item.kind === "video");
   if (!snapshot || !binding) throw new Error("Runtime snapshot has no video provider binding");
   const config = await repository.findProviderConfig(binding.configId);
-  if (!config || config.kind !== "video" || config.status !== "published" || !config.endpoint || config.providerId !== binding.providerId || config.version !== binding.version) throw new Error("Runtime video provider binding is unavailable");
+  if (!config || config.kind !== "video" || !config.endpoint || config.providerId !== binding.providerId || config.version !== binding.version) throw new Error("Runtime video provider binding is unavailable");
   const deck = await repository.findArtifactMetadata(input.deckArtifactId); const reveal = await repository.findArtifactMetadata(input.revealArtifactId);
   const speechMetadata = await repository.findArtifactMetadata(input.speechManifestArtifactId);
   if (!options.artifactS3Bucket || !/^(?=.{3,63}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])$/.test(options.artifactS3Bucket)) throw new Error("Durable S3 artifact staging is required for video rendering");

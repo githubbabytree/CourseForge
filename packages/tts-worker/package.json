@@ -1,6 +1,6 @@
 {
   "name": "@courseforge/tts-worker",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "private": true,
   "scripts": {
     "build": "python3 -m compileall -q src",

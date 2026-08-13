@@ -1,0 +1,31 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import sharp from "sharp";
+import { DeckSpecV1Schema, PromptVersionV1Schema, ProviderConfigVersionV1Schema, type SessionUserV1 } from "@courseforge/contracts";
+import { InMemoryArtifactStore, createDeckArtifactBuilder } from "@courseforge/deck";
+import { InMemoryArtifactBlobStore, persistBinaryArtifact, persistDeckArtifactBundle } from "./artifacts.js";
+import { InMemoryCourseForgeRepository } from "./repositories.js";
+import { confirmVisualReview, createVisualReview, findCurrentVisualConfirmation } from "./visual-review.js";
+
+test("visual review binds real PNG hashes, keeps AI advisory, and confirmation becomes stale for a changed Deck", async () => {
+  const repository=new InMemoryCourseForgeRepository(), blobs=new InMemoryArtifactBlobStore();
+  const actor:SessionUserV1={schemaVersion:"1",userId:crypto.randomUUID(),email:"editor@example.test",displayName:"Editor",role:"course_editor"};
+  const projectId=crypto.randomUUID(), now=new Date().toISOString();
+  await repository.saveProject({schemaVersion:"1",projectId,ownerId:actor.userId,dataPolicy:{schemaVersion:"1",mode:"internal",classification:"internal"},brief:{schemaVersion:"1",title:"安全培训",idea:"测试",audience:"员工",durationMinutes:5,objectives:["行动"],background:"",locale:"zh-CN",sourceArtifactIds:[]},createdAt:now,updatedAt:now});
+  const config=ProviderConfigVersionV1Schema.parse({schemaVersion:"1",configId:crypto.randomUUID(),kind:"multimodal",providerId:"vision",version:"v1",displayName:"Vision",endpoint:"https://vision.example/v1",model:"vision-model",capabilities:["image-input"],settings:{enabled:true,allowedOrigins:["https://vision.example"],dataBoundary:"internal",internalAllowedOrigins:["https://vision.example"]},secretRefs:{primary:"env://VISION_KEY"},status:"published",createdAt:new Date(0).toISOString(),createdBy:actor.userId,publishedAt:new Date(0).toISOString(),inactiveAt:null});
+  const prompt=PromptVersionV1Schema.parse({schemaVersion:"1",promptVersionId:crypto.randomUUID(),promptKey:"visual.deck-review",version:"v1",description:"review",template:"Style {{styleProfileJson}} rubric {{rubricJson}}",status:"published",createdAt:new Date(0).toISOString(),createdBy:actor.userId,publishedAt:new Date(0).toISOString(),inactiveAt:null});
+  await repository.createProviderConfig(config); await repository.createPromptVersion(prompt);
+  const snapshot=await repository.captureRuntimeConfigSnapshot(crypto.randomUUID(),now,actor.userId);
+  const deck=DeckSpecV1Schema.parse({schemaVersion:"1",deckId:crypto.randomUUID(),revision:1,title:"安全培训",themeId:"safe",aspectRatio:"16:9",slides:[{schemaVersion:"1",slideId:"slide-one",title:"行动",layout:"content",blocks:[{kind:"text",body:"立即上报"}],speakerNotes:"立即上报。",targetDurationSeconds:30,learningObjectiveIds:["one"],sourceIds:[],transition:"fade"}]});
+  const store=new InMemoryArtifactStore(), bundle=await createDeckArtifactBuilder(store)(deck,{projectId,jobId:crypto.randomUUID(),revision:1,configurationVersion:snapshot.snapshotId,providerId:"deck"});
+  await persistDeckArtifactBundle(repository,blobs,store,bundle);
+  const png=await sharp({create:{width:1920,height:1080,channels:3,background:"#081421"}}).composite([{input:Buffer.from('<svg width="600" height="200"><rect width="600" height="200" fill="white"/><text x="30" y="120" font-size="64">CourseForge</text></svg>'),left:100,top:100}]).png().toBuffer();
+  const render=await persistBinaryArtifact({repository,blobStore:blobs,projectId,jobId:crypto.randomUUID(),configurationVersion:snapshot.snapshotId,providerId:"video-worker",kind:"slide-render-png",mediaType:"image/png",content:png,sourceArtifactIds:[bundle.artifacts.deckSpec.artifactId,bundle.artifacts.revealHtml.artifactId]});
+  const fetch=async()=>Response.json({choices:[{finish_reason:"stop",message:{content:JSON.stringify({findings:[{slideId:"slide-one",category:"hierarchy",severity:"warning",evidence:"标题层级可更鲜明",suggestion:"增加标题与正文的字号差"}]})}}]});
+  const result=await createVisualReview(repository,blobs,projectId,actor,{snapshotId:snapshot.snapshotId,deckArtifactId:bundle.artifacts.deckSpec.artifactId,slideRenderArtifactIds:[render.artifactId]},{fetch,secrets:{resolve:async()=>"fixture"}});
+  assert.equal(result.review.deterministicBlockerCount,0); assert.equal(result.review.aiWarningCount,1); assert.equal(result.review.authority,"non-authoritative-ai-assistance");
+  const confirmed=await confirmVisualReview(repository,blobs,projectId,actor,{visualReviewArtifactId:result.artifact.artifactId,note:"已人工逐页核对"});
+  assert.equal(confirmed.confirmation.deckContentSha256,bundle.artifacts.deckSpec.contentHash);
+  assert.ok(await findCurrentVisualConfirmation(repository,blobs,projectId,bundle.artifacts.deckSpec.artifactId,bundle.artifacts.deckSpec.contentHash));
+  assert.equal(await findCurrentVisualConfirmation(repository,blobs,projectId,bundle.artifacts.deckSpec.artifactId,"f".repeat(64)),undefined);
+});

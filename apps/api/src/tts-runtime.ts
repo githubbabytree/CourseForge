@@ -223,7 +223,7 @@ export class PersistedTtsExecutor implements StageExecutor {
   private async requireDurationRevisionRuntime(): Promise<DurationRevisionRuntime> {
     if (!this.loadDurationRevisionRuntime) throw new Error("Published tts.duration-revision prompt and text provider are required for narration timing repair");
     const runtime = await this.loadDurationRevisionRuntime();
-    if (runtime.prompt.promptKey !== "tts.duration-revision" || runtime.prompt.status !== "published") throw new Error("Published tts.duration-revision prompt is required for narration timing repair");
+    if (runtime.prompt.promptKey !== "tts.duration-revision") throw new Error("Snapshot-bound tts.duration-revision prompt is required for narration timing repair");
     return runtime;
   }
 }
@@ -254,7 +254,7 @@ export async function createPersistedTtsExecutor(repository: CourseForgeReposito
   const binding = snapshot.providerBindings.find((item) => item.kind === "tts");
   if (!binding) throw new Error("Runtime snapshot has no TTS provider binding");
   const config = await repository.findProviderConfig(binding.configId);
-  if (!config || config.kind !== "tts" || config.status !== "published" || !config.endpoint) throw new Error("Runtime TTS provider binding is unavailable");
+  if (!config || config.kind !== "tts" || config.providerId!==binding.providerId || config.version!==binding.version || !config.endpoint) throw new Error("Runtime TTS provider binding is unavailable");
   const deckArtifact = await repository.findArtifactMetadata(deckArtifactId);
   if (!deckArtifact || deckArtifact.projectId !== projectId || deckArtifact.kind !== "deck-spec") throw new Error("Deck artifact is unavailable");
   const deckBytes = await blobStore.get(deckArtifactId);
@@ -275,13 +275,13 @@ export async function createPersistedTtsExecutor(repository: CourseForgeReposito
     id: config.providerId, displayName: config.displayName, engine, engineRevision: stringSetting(config, "engineRevision"),
     baseUrl: config.endpoint, allowedOrigins, ...(secretRef ? { secretRef } : {}), timeoutMs: numberSetting(config, "timeoutMs", 60_000),
     maxAudioBytes: Math.min(numberSetting(config, "maxAudioBytes", 20 * 1024 * 1024), 20 * 1024 * 1024),
+    modelSha256:provenance.modelSha256,modelLicenseId:provenance.modelLicenseId,
     output: { container: "wav", sampleRateHz: numberSetting(config, "sampleRateHz", 24_000), channels },
   }, { ...(options.fetch ? { fetch: options.fetch } : {}), secrets: options.secrets ?? new EnvironmentSecretResolver() });
   const loadDurationRevisionRuntime = async (): Promise<DurationRevisionRuntime> => {
     const project = await repository.findProject(projectId);
     if (!project) throw new Error("TTS project is unavailable for duration revision");
     const prompt = await findSnapshotPrompt(repository, snapshot, "tts.duration-revision");
-    if (prompt.status !== "published") throw new Error("Published tts.duration-revision prompt is required for narration timing repair");
     const textProvider = await createSnapshotTextProvider(repository, snapshotId, options, project);
     return { provider: textProvider, prompt };
   };

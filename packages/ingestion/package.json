@@ -1,6 +1,6 @@
 {
   "name": "@courseforge/ingestion",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
@@ -17,7 +17,7 @@
     "test": "npm run build && node ../../scripts/run-built-tests.mjs"
   },
   "dependencies": {
-    "@courseforge/contracts": "1.0.1",
+    "@courseforge/contracts": "1.1.0",
     "pdfjs-dist": "6.2.108"
   },
   "devDependencies": {

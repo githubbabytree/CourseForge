@@ -514,7 +514,7 @@ export class PostgresCourseForgeRepository implements CourseForgeRepository {
       `INSERT INTO runtime_config_snapshots (snapshot_id,captured_at,captured_by,provider_bindings,prompt_bindings,qa_policy_id)
        SELECT $1,$2,$3,
          COALESCE((SELECT jsonb_agg(jsonb_build_object('kind',kind,'configId',config_id,'providerId',provider_id,'version',version) ORDER BY kind) FROM provider_config_versions WHERE status='published'),'[]'::jsonb),
-         COALESCE((SELECT jsonb_agg(jsonb_build_object('promptKey',prompt_key,'promptVersionId',prompt_version_id,'version',version) ORDER BY prompt_key) FROM prompt_versions WHERE status='published'),'[]'::jsonb),
+         COALESCE((SELECT jsonb_agg(jsonb_build_object('promptKey',prompt_key,'promptVersionId',prompt_version_id,'version',version,'contentHash',encode(sha256(convert_to(prompt_key || ':' || version || ':' || template,'UTF8')),'hex')) ORDER BY prompt_key) FROM prompt_versions WHERE status='published'),'[]'::jsonb),
          (SELECT qa_policy_id FROM qa_policy_versions WHERE status='published' ORDER BY published_at DESC LIMIT 1)
        RETURNING snapshot_id,captured_at,captured_by,provider_bindings,prompt_bindings,(SELECT document FROM qa_policy_versions q WHERE q.qa_policy_id=runtime_config_snapshots.qa_policy_id) AS qa_policy_document`, [snapshotId, capturedAt, capturedBy]);
     return mapSnapshot(result.rows[0]!);

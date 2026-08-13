@@ -351,13 +351,15 @@ export const DeckSpecV1Schema = Versioned.extend({
     templateContentHash: Sha256Schema.nullable(),
     brandAssetIds: z.array(z.string().uuid()).max(100),
     brandAssetContentHashes: z.record(z.string().uuid(), Sha256Schema),
+    styleProfileArtifactId: ArtifactIdSchema.nullable().optional(),
+    styleProfileContentHash: Sha256Schema.nullable().optional(),
     usedDefaultDirection: z.boolean()
   }).strict().optional(),
   slides: z.array(SlideSpecV1Schema).min(1).max(200)
 });
 export type DeckSpecV1 = z.infer<typeof DeckSpecV1Schema>;
 export const DesignDirectionV1Schema = z.object({ directionId: z.string().min(1).max(100), name: z.string().min(1).max(200), rationale: z.string().min(1).max(2_000), themeTokens: z.record(z.string(), z.string()).refine(v => Object.keys(v).length <= 64) }).strict();
-export const DesignPlanV1Schema = Versioned.extend({ planId: z.string().uuid(), projectId: z.string().uuid(), snapshotId: z.string().uuid(), materialArtifactId: ArtifactIdSchema, materialContentHash: Sha256Schema, directions: z.array(DesignDirectionV1Schema).min(1).max(3), defaultDirectionId: z.string().min(1).max(100), createdAt: z.string().datetime() }).strict();
+export const DesignPlanV1Schema = Versioned.extend({ planId: z.string().uuid(), projectId: z.string().uuid(), snapshotId: z.string().uuid(), materialArtifactId: ArtifactIdSchema, materialContentHash: Sha256Schema, styleProfileBinding:z.object({artifactId:ArtifactIdSchema,contentHash:Sha256Schema}).strict().nullable().optional(), directions: z.array(DesignDirectionV1Schema).min(1).max(3), defaultDirectionId: z.string().min(1).max(100), createdAt: z.string().datetime() }).strict();
 export type DesignPlanV1 = z.infer<typeof DesignPlanV1Schema>;
 export const CreateDesignTemplateRequestSchema=z.object({name:z.string().min(1).max(160),version:z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$/),themeTokens:z.record(z.string(),z.string()).refine(v=>Object.keys(v).length<=64),layoutConstraints:z.object({allowedLayouts:z.array(z.enum(["title","content","split","quote","summary"])).min(1),maxBlocksPerSlide:z.number().int().min(1).max(12)}).strict()}).strict();
 export const DesignTemplateVersionV1Schema=Versioned.extend({templateId:z.string().uuid(),...CreateDesignTemplateRequestSchema.shape,status:z.enum(["draft","published","inactive"]),contentHash:Sha256Schema,createdAt:z.string().datetime(),createdBy:z.string().uuid(),publishedAt:z.string().datetime().nullable(),inactiveAt:z.string().datetime().nullable()}).strict();export type DesignTemplateVersionV1=z.infer<typeof DesignTemplateVersionV1Schema>;
@@ -590,6 +592,51 @@ export const VisualAnalysisV1Schema = Versioned.extend({
   authority: z.literal("non-authoritative-ai-assistance"), createdAt: z.string().datetime()
 }).strict();
 export type VisualAnalysisV1 = z.infer<typeof VisualAnalysisV1Schema>;
+
+export const StyleProfileV1Schema = Versioned.extend({
+  styleProfileId: z.string().uuid(), projectId: z.string().uuid(), snapshotId: z.string().uuid(),
+  referenceArtifacts: z.array(z.object({ artifactId: ArtifactIdSchema, contentSha256: Sha256Schema }).strict()).min(1).max(8),
+  prompt: z.object({ promptVersionId: z.string().uuid(), version: z.string().min(1).max(100), contentHash: Sha256Schema }).strict(),
+  model: z.object({ providerConfigId: z.string().uuid(), providerId: z.string().min(1).max(100), name: z.string().min(1).max(200) }).strict(),
+  tokens: z.object({
+    palette: z.record(z.string(), z.string()).refine((value) => Object.keys(value).length <= 32),
+    typography: z.record(z.string(), z.string()).refine((value) => Object.keys(value).length <= 32),
+    spacing: z.record(z.string(), z.number().finite()).refine((value) => Object.keys(value).length <= 32),
+    layoutPatterns: z.array(z.string().min(1).max(500)).max(32), imageLanguage: z.array(z.string().min(1).max(500)).max(32),
+    chartStyle: z.array(z.string().min(1).max(500)).max(32), decorativeElements: z.array(z.string().min(1).max(500)).max(32),
+    motion: z.array(z.string().min(1).max(500)).max(32), forbiddenPatterns: z.array(z.string().min(1).max(500)).max(64)
+  }).strict(),
+  confidence: z.number().min(0).max(1), authority: z.literal("non-authoritative-ai-assistance"),
+  supersedesStyleProfileId: z.string().uuid().nullable().default(null), createdAt: z.string().datetime(), createdBy: z.string().uuid()
+}).strict();
+export type StyleProfileV1 = z.infer<typeof StyleProfileV1Schema>;
+
+export const VisualFindingV1Schema = z.object({
+  findingId: z.string().regex(/^finding-[a-f0-9]{16}$/), slideId: z.string().min(1).max(128),
+  category: z.enum(["overflow", "clipping", "missing-image", "font-fallback", "blank-space", "abnormal-blank", "contrast", "asset-ratio", "render-failure", "style-consistency", "hierarchy", "readability", "balance", "repetition", "brand-deviation"]),
+  severity: z.enum(["info", "warning", "blocker"]), source: z.enum(["deterministic", "multimodal"]),
+  evidence: z.string().trim().min(1).max(2_000), suggestion: z.string().trim().min(1).max(2_000)
+}).strict();
+export const VisualReviewV1Schema = Versioned.extend({
+  visualReviewId: z.string().uuid(), projectId: z.string().uuid(), snapshotId: z.string().uuid(), deckArtifactId: ArtifactIdSchema, deckContentSha256: Sha256Schema,
+  styleProfileArtifactId: ArtifactIdSchema.nullable(), rubricVersion: z.literal("courseforge-visual-rubric-v1"),
+  slides: z.array(z.object({ slideId: z.string().min(1).max(128), renderArtifactId: ArtifactIdSchema, renderContentSha256: Sha256Schema }).strict()).min(1).max(200),
+  findings: z.array(VisualFindingV1Schema).max(2_000), deterministicBlockerCount: z.number().int().nonnegative(), aiWarningCount: z.number().int().nonnegative(),
+  authority: z.literal("non-authoritative-ai-assistance"), prompt: z.object({ promptVersionId: z.string().uuid(), version: z.string().min(1).max(100), contentHash: Sha256Schema }).nullable(),
+  model: z.object({ providerConfigId: z.string().uuid(), providerId: z.string().min(1).max(100), name: z.string().min(1).max(200) }).nullable(),
+  createdAt: z.string().datetime(), createdBy: z.string().uuid()
+}).strict().superRefine((value, context) => {
+  if (value.deterministicBlockerCount !== value.findings.filter((item) => item.source === "deterministic" && item.severity === "blocker").length) context.addIssue({ code: z.ZodIssueCode.custom, path: ["deterministicBlockerCount"], message: "deterministic blocker count must match findings" });
+  if (value.aiWarningCount !== value.findings.filter((item) => item.source === "multimodal" && item.severity === "warning").length) context.addIssue({ code: z.ZodIssueCode.custom, path: ["aiWarningCount"], message: "AI warning count must match findings" });
+});
+export type VisualReviewV1 = z.infer<typeof VisualReviewV1Schema>;
+
+export const VisualConfirmationV1Schema = Versioned.extend({
+  visualConfirmationId: z.string().uuid(), projectId: z.string().uuid(), visualReviewArtifactId: ArtifactIdSchema,
+  deckArtifactId: ArtifactIdSchema, deckContentSha256: Sha256Schema, slideRenderHashes: z.array(Sha256Schema).min(1).max(200),
+  note: z.string().trim().min(1).max(2_000), confirmedAt: z.string().datetime(), confirmedBy: z.string().uuid()
+}).strict();
+export type VisualConfirmationV1 = z.infer<typeof VisualConfirmationV1Schema>;
 
 export const QaCheckV1Schema = z.object({
   checkId: z.string().regex(/^[a-z][a-z0-9._-]{0,99}$/),
@@ -834,7 +881,9 @@ export const RuntimeProviderBindingV1Schema = z.object({
 export const RuntimePromptBindingV1Schema = z.object({
   promptKey: z.string().min(1).max(100),
   promptVersionId: z.string().uuid(),
-  version: z.string().min(1).max(100)
+  version: z.string().min(1).max(100),
+  /** Optional only for reading snapshots captured before v1.1.0. New snapshots always set it. */
+  contentHash: Sha256Schema.optional()
 });
 export const RuntimeConfigSnapshotRecordV1Schema = Versioned.extend({
   snapshotId: z.string().uuid(),

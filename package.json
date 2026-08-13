@@ -1,6 +1,6 @@
 {
   "name": "courseforge",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -16,7 +16,8 @@
     "prepare": "node scripts/install-git-hooks.mjs",
     "test": "npm run build:foundations && npm run test --workspaces --if-present",
     "typecheck": "npm run build:foundations && npm run typecheck --workspaces --if-present",
-    "verify": "npm run build:foundations && npm run check:secrets && npm run check:version && npm run check:ops && npm run typecheck && npm test && npm run build"
+    "verify": "npm run build:foundations && npm run check:secrets && npm run check:version && npm run check:ops && npm run typecheck && npm test && npm run build",
+    "verify:full": "npm run verify"
   },
   "engines": {
     "node": ">=22"

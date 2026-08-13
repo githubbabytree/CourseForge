@@ -18,7 +18,8 @@ test("Playwright/FFmpeg and FFmpeg sidecars share controlled artifact input and 
   for (const engine of VIDEO_RENDER_ENGINES) {
     let posted: Record<string, unknown> | undefined; const video = mp4();
     const provider = new HttpBinaryVideoSidecarProvider({ ...config, id: `video-${engine}`, engine }, { secrets: { resolve: async () => "runtime-fixture" }, fetch: async (input, init) => {
-      if (String(input).endsWith("/health")) return Response.json({ status: "ok", engine, engineRevision: config.engineRevision });
+      if (String(input).endsWith("/health")) return Response.json({ status: "ok", engine, engineRevision: config.engineRevision,rendererImageDigest:config.rendererImageDigest,browserRevision:config.browserRevision,ffmpegRevision:config.ffmpegRevision,fontBundleSha256:config.fontBundleSha256 });
+      if(String(input).endsWith("/v1/probe"))return Response.json({schemaVersion:"1",engine,engineRevision:config.engineRevision,width:1920,height:1080,fps:30,frameCount:30,durationMs:1000,mp4Sha256:"c".repeat(64),slidePngSha256:"d".repeat(64),rendererImageDigest:config.rendererImageDigest,browserRevision:config.browserRevision,ffmpegRevision:config.ffmpegRevision,fontBundleSha256:config.fontBundleSha256});
       posted = JSON.parse(String(init?.body)); assert.equal(init?.redirect, "manual"); return response(video, engine, config.engineRevision);
     } });
     assert.equal((await provider.probe()).healthy, true);

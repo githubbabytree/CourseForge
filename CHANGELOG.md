@@ -2,6 +2,29 @@
 
 本项目遵循语义化版本。日期统一使用 UTC+8。
 
+## [1.1.0] - 2026-08-13
+
+### 新增
+
+- 增加 `course-full` 运行就绪度门禁，按不可变快照核验 Text、Search、Design、Multimodal、TTS、Video、十个业务 Prompt、发音词典、设计模板、QA Policy 与真实能力探针。
+- 增加代码侧 Prompt Definition Catalog、安全内置只读 Prompt，以及缺失业务 Prompt 的预览和 Draft 初始化。
+- 增加 `StyleProfileV1`、`VisualReviewV1` 与人工视觉确认契约；风格令牌可固定绑定到设计计划和 Deck。
+- 视频 Worker 输出逐页 1920×1080 PNG Artifact，并由确定性检查和严格 Schema 多模态复核复用。
+- 增加风格档案、视觉复核、最新复核和人工确认 API；发布要求当前 Deck/截图哈希对应的视觉确认。
+
+### 安全与可靠性
+
+- Text 与 Multimodal 探针改为真实严格 JSON Schema 生成；多模态探针必须识别合成图片内容。
+- Search、Design、TTS、Video 探针改为实际能力调用；Provider 只有在发布后新鲜健康探针通过时才能发布或进入新快照。
+- TTS 固定模型 SHA-256 与许可证证明；Video 固定镜像、Chromium、FFmpeg、字体并执行最小真实渲染。
+- Prompt 快照增加内容哈希；旧快照保持可读，但无哈希绑定时不可运行。
+- 新增视觉治理 Artifact 的 PostgreSQL 约束迁移。
+
+### 需要部署方验收
+
+- 生产凭据、TTS 模型/音色/许可证、Video 镜像和字体仍须运维提供并人工审批，运行时不会下载模型。
+- 只有备份 PostgreSQL/MinIO、运行全部真实探针、创建新快照并完成 6 页课程的 QA、人工确认、发布和下载后，才可宣称生产全流程跑通。
+
 ## [1.0.1] - 2026-08-13
 
 ### 修复

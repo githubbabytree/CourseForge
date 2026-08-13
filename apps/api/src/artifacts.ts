@@ -7,7 +7,7 @@ export const ARTIFACT_KINDS = [
   "video-render-input", "video-manifest", "video-mp4",
   "image-asset", "image-metadata",
   "design-plan",
-  "research-evidence", "visual-analysis", "qa-report", "qa-approval", "published-course",
+  "research-evidence", "visual-analysis", "visual-style-profile", "slide-render-png", "visual-review", "visual-confirmation", "qa-report", "qa-approval", "published-course",
   "image-search-candidates", "webppt-package", "release-manifest",
 ] as const;
 export type ArtifactKind = typeof ARTIFACT_KINDS[number];
@@ -46,6 +46,7 @@ const expectedMediaType = (kind: ArtifactKind): ArtifactMediaType => {
   if (kind === "reveal-html") return "text/html; charset=utf-8";
   if (kind === "audio-wav") return "audio/wav";
   if (kind === "video-mp4") return "video/mp4";
+  if (kind === "slide-render-png") return "image/png";
   if (kind === "webppt-package") return "application/zip";
   if (kind === "image-asset") throw new InvalidArtifactError("Image MIME must be validated before persistence");
   if (kind === "subtitles-vtt") return "text/vtt; charset=utf-8";
@@ -107,7 +108,7 @@ export async function persistBinaryArtifact(input: {
   jobId: string;
   configurationVersion: string;
   providerId: string;
-  kind: "narration-manifest" | "tts-manifest" | "audio-wav" | "subtitles-vtt" | "subtitles-srt" | "render-manifest" | "video-render-input" | "video-manifest" | "video-mp4" | "image-asset" | "image-metadata" | "research-evidence" | "visual-analysis" | "qa-report" | "qa-approval" | "published-course" | "image-search-candidates" | "webppt-package" | "release-manifest";
+  kind: "narration-manifest" | "tts-manifest" | "audio-wav" | "subtitles-vtt" | "subtitles-srt" | "render-manifest" | "video-render-input" | "video-manifest" | "video-mp4" | "image-asset" | "image-metadata" | "research-evidence" | "visual-analysis" | "visual-style-profile" | "slide-render-png" | "visual-review" | "visual-confirmation" | "qa-report" | "qa-approval" | "published-course" | "image-search-candidates" | "webppt-package" | "release-manifest";
   mediaType: ArtifactMediaType;
   content: Uint8Array;
   sourceArtifactIds?: readonly string[];
@@ -115,7 +116,7 @@ export async function persistBinaryArtifact(input: {
   createdAt?: string;
 }): Promise<ArtifactMetadataRecord> {
   if (input.kind === "image-asset" ? !["image/png", "image/jpeg", "image/webp"].includes(input.mediaType) : input.mediaType !== expectedMediaType(input.kind)) throw new InvalidArtifactError("Artifact MIME does not match kind");
-  const maximum = input.kind === "video-mp4" || input.kind === "webppt-package" ? MAX_ARTIFACT_BYTES : input.kind === "image-asset" ? 10 * 1024 * 1024 : MAX_NON_VIDEO_ARTIFACT_BYTES;
+  const maximum = input.kind === "video-mp4" || input.kind === "webppt-package" ? MAX_ARTIFACT_BYTES : input.kind === "image-asset" || input.kind === "slide-render-png" ? 10 * 1024 * 1024 : MAX_NON_VIDEO_ARTIFACT_BYTES;
   if (input.content.byteLength > maximum) throw new InvalidArtifactError(`Artifact exceeds ${maximum / 1024 / 1024} MB`);
   if (input.sourceArtifactIds?.some((id) => !ARTIFACT_ID.test(id))) throw new InvalidArtifactError("Invalid source artifact id");
   const content = Uint8Array.from(input.content);
