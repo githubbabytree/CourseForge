@@ -72,6 +72,7 @@ printf '%s\n' \
   "MINIO_VIDEO_READER_USER=$video_user" \
   "MINIO_VIDEO_READER_PASSWORD=$video_pass" \
   "VIDEO_WORKER_AUTH_TOKEN=$video_token" \
+  '# Protocol-only placeholder; production must use scripts/video-worker-evidence.sh and docker image inspect.' \
   'VIDEO_WORKER_IMAGE_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
   'ARTIFACT_S3_REGION=us-east-1' \
   'ARTIFACT_S3_BUCKET=courseforge-smoke' >"$env_file"
@@ -93,7 +94,7 @@ wait_for_gateway
 curl --fail --silent --show-error "$base_url/health" >"$response_file"
 node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));if(v.status!=="ok"||v.persistenceBackend!=="postgres"||v.artifactBackend!=="s3"||v.documentParserBackend!=="http-worker")process.exit(1)' "$response_file"
 curl --fail --silent --show-error "$base_url/version" >"$response_file"
-node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));if(v.name!=="courseforge-api"||v.version!=="1.0.0"||v.deploymentRevision!=="container-smoke")process.exit(1)' "$response_file"
+node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));if(v.name!=="courseforge-api"||v.version!=="1.0.1"||v.deploymentRevision!=="container-smoke")process.exit(1)' "$response_file"
 metrics_status="$(curl --silent --output /dev/null --write-out '%{http_code}' "$base_url/metrics")"
 [[ "$metrics_status" == "404" ]] || { echo "public metrics boundary returned $metrics_status" >&2; exit 1; }
 "${compose[@]}" exec -T api node -e "fetch('http://127.0.0.1:3001/metrics').then(async r=>{const t=await r.text();if(!r.ok||!t.includes('courseforge_http_requests_total')||/example\\.invalid|project title|prompt|secret/i.test(t))process.exit(1)}).catch(()=>process.exit(1))"

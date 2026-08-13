@@ -5,9 +5,17 @@ FROM mcr.microsoft.com/playwright:v1.55.0-noble@sha256:b27e719ecbfef153e13fd24e8
 WORKDIR /workspace
 ENV NPM_CONFIG_REGISTRY=https://registry.npmjs.org
 COPY package.json package-lock.json tsconfig.base.json ./
+COPY apps/api/package.json ./apps/api/package.json
+COPY apps/web/package.json ./apps/web/package.json
 COPY packages/contracts/package.json ./packages/contracts/package.json
+COPY packages/deck/package.json ./packages/deck/package.json
+COPY packages/ingestion/package.json ./packages/ingestion/package.json
+COPY packages/document-worker/package.json ./packages/document-worker/package.json
 COPY packages/media/package.json ./packages/media/package.json
 COPY packages/video-worker/package.json ./packages/video-worker/package.json
+COPY packages/tts-worker/package.json ./packages/tts-worker/package.json
+COPY packages/providers/package.json ./packages/providers/package.json
+COPY packages/workflow/package.json ./packages/workflow/package.json
 RUN --mount=type=cache,id=courseforge-video-npm,target=/root/.npm,sharing=locked \
     npm ci --ignore-scripts --no-audit --no-fund
 COPY packages/contracts ./packages/contracts
@@ -15,8 +23,25 @@ COPY packages/media ./packages/media
 COPY packages/video-worker ./packages/video-worker
 RUN npm run build --workspace=@courseforge/contracts && \
     npm run build --workspace=@courseforge/media && \
-    npm run build --workspace=@courseforge/video-worker && \
-    npm prune --omit=dev --ignore-scripts
+    npm run build --workspace=@courseforge/video-worker
+
+FROM mcr.microsoft.com/playwright:v1.55.0-noble@sha256:b27e719ecbfef153e13fd24e8341736733bf2658b229677eb21ff57ff5d7fb29 AS production-dependencies
+WORKDIR /workspace
+ENV NPM_CONFIG_REGISTRY=https://registry.npmjs.org
+COPY package.json package-lock.json ./
+COPY apps/api/package.json ./apps/api/package.json
+COPY apps/web/package.json ./apps/web/package.json
+COPY packages/contracts/package.json ./packages/contracts/package.json
+COPY packages/deck/package.json ./packages/deck/package.json
+COPY packages/ingestion/package.json ./packages/ingestion/package.json
+COPY packages/document-worker/package.json ./packages/document-worker/package.json
+COPY packages/media/package.json ./packages/media/package.json
+COPY packages/video-worker/package.json ./packages/video-worker/package.json
+COPY packages/tts-worker/package.json ./packages/tts-worker/package.json
+COPY packages/providers/package.json ./packages/providers/package.json
+COPY packages/workflow/package.json ./packages/workflow/package.json
+RUN --mount=type=cache,id=courseforge-video-npm,target=/root/.npm,sharing=locked \
+    npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 
 FROM mcr.microsoft.com/playwright:v1.55.0-noble@sha256:b27e719ecbfef153e13fd24e8341736733bf2658b229677eb21ff57ff5d7fb29 AS runtime
 ENV NODE_ENV=production \
@@ -32,8 +57,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg dumb-ini
     mkdir -p /workspace /opt/courseforge && \
     sha256sum /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc | cut -d' ' -f1 >/opt/courseforge/font-bundle.sha256 && \
     chown -R courseforge-video:courseforge-video /workspace
-COPY --from=build --chown=courseforge-video:courseforge-video /workspace/package.json /workspace/package-lock.json ./
-COPY --from=build --chown=courseforge-video:courseforge-video /workspace/node_modules ./node_modules
+COPY --from=production-dependencies --chown=courseforge-video:courseforge-video /workspace/package.json /workspace/package-lock.json ./
+COPY --from=production-dependencies --chown=courseforge-video:courseforge-video /workspace/node_modules ./node_modules
+COPY --from=production-dependencies --chown=courseforge-video:courseforge-video /workspace/packages/video-worker ./packages/video-worker
 COPY --from=build --chown=courseforge-video:courseforge-video /workspace/packages/media/package.json ./packages/media/package.json
 COPY --from=build --chown=courseforge-video:courseforge-video /workspace/packages/media/dist ./packages/media/dist
 COPY --from=build --chown=courseforge-video:courseforge-video /workspace/packages/video-worker/package.json ./packages/video-worker/package.json

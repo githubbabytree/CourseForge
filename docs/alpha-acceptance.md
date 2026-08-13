@@ -1,4 +1,4 @@
-# CourseForge v1.0.0 发布验收门
+# CourseForge v1.0.1 发布验收门
 
 本文件保留历史路径以兼容既有链接。代码测试通过只代表源代码发布门通过，不能代替目标主机和真实 Provider 验收。
 
@@ -35,7 +35,7 @@
 - 从锁文件干净安装后，`npm run verify` 全部通过。
 - Git index、当前候选文件和可达历史不存在真实凭据、内部地址、材料、生成媒体或模型权重。
 - package、lockfile、API `/version` 源和示例部署 revision 一致。
-- Pull Request CI 通过，合并提交与 `v1.0.0` 标签指向同一 commit。
+- Pull Request CI 通过，合并提交与 `v1.0.1` 标签指向同一 commit。
 
 ## 目标环境门
 
@@ -44,4 +44,4 @@
 - 真实 Provider、中文 TTS、Chromium/FFmpeg、备份恢复和受保护浏览器/API 闭环通过。
 - 任何曾出现在聊天或日志中的凭据已经撤销并轮换。
 
-目标环境门由部署方留存证据；GitHub v1.0.0 源代码 Release 不表示这些环境门已经完成。
+目标环境门由部署方留存证据；GitHub v1.0.1 源代码 Release 不表示这些环境门已经完成。

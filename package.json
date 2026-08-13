@@ -1,6 +1,6 @@
 {
   "name": "courseforge",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -12,7 +12,7 @@
     "dev": "npm run dev --workspace=@courseforge/web",
     "check:secrets": "node scripts/check-secrets.mjs",
     "check:version": "node scripts/check-version.mjs",
-    "check:ops": "bash -n scripts/backup.sh scripts/restore.sh scripts/capacity-report.sh scripts/container-smoke.sh && node --test scripts/ops-scripts.test.mjs",
+    "check:ops": "bash -n scripts/backup.sh scripts/restore.sh scripts/capacity-report.sh scripts/container-smoke.sh scripts/upgrade-preflight.sh scripts/video-worker-evidence.sh && node --test scripts/ops-scripts.test.mjs",
     "prepare": "node scripts/install-git-hooks.mjs",
     "test": "npm run build:foundations && npm run test --workspaces --if-present",
     "typecheck": "npm run build:foundations && npm run typecheck --workspaces --if-present",

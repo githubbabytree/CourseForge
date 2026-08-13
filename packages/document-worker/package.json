@@ -1,6 +1,6 @@
 {
   "name": "@courseforge/document-worker",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "main": "dist/server.js",
@@ -12,8 +12,8 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
-    "@courseforge/contracts": "1.0.0",
-    "@courseforge/ingestion": "1.0.0"
+    "@courseforge/contracts": "1.0.1",
+    "@courseforge/ingestion": "1.0.1"
   },
   "devDependencies": {
     "@types/node": "^22.13.4",

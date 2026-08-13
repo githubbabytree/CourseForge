@@ -1,4 +1,4 @@
-# CourseForge v1.0.0 容器部署
+# CourseForge v1.0.1 容器部署
 
 The checked-in stack is an acceptance topology, not an unattended production
 installer. Caddy is the only service with a host port. Web, API, PostgreSQL and
@@ -15,6 +15,8 @@ Copy `infra/.env.example` to an ignored `infra/.env` and replace every
 - `GATEWAY_PORT=8080`
 - `GATEWAY_CONTAINER_PORT=8080`
 - `COURSEFORGE_PUBLIC_ORIGIN=http://127.0.0.1:8080`
+- `COURSEFORGE_CORS_ORIGINS=http://127.0.0.1:8080`
+- `COURSEFORGE_COMPOSE_PROJECT_NAME=courseforge`
 - `SECURE_COOKIES=false`
 
 Run `docker compose --env-file infra/.env -f infra/compose.yaml up -d --build
@@ -57,6 +59,18 @@ The production gate additionally requires a remote image build, healthy
 services, `/api/version` matching the intended revision, a protected browser/API
 smoke, backup/restore evidence, and rotation of any credential that has ever
 appeared in chat or logs.
+
+An upgrade from `v0.2.0-alpha.2` must preserve the legacy Compose project name
+through the ignored environment file and pass `scripts/upgrade-preflight.sh`
+with a verified PostgreSQL+MinIO backup. See `upgrade-v1.0.1.zh-CN.md`. Never
+edit the release Compose file with `sed` and never use `docker compose down -v`
+during an in-place upgrade.
+
+The API mounts the reviewed `infra/mcporter.example.json` by default. The file
+contains no key; the Search Provider resolves its `env://` reference and passes
+the value to mcporter only as `EXA_API_KEY`. A deployment-specific config must
+be a reviewed read-only file selected with `MCPORTER_CONFIG_HOST_PATH`, not a
+copy of a user's full `~/.mcporter` directory.
 
 The API fails closed when the production profile or an HTTPS site address is
 combined with `SECURE_COOKIES=false`. See `production-operations.md` for the
