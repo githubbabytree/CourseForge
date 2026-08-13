@@ -2,7 +2,7 @@
 
 CourseForge 是面向大型互联网企业内部信息安全培训的一站式 AI 课程生产平台。它可以把一个培训点子、制度文档或既有课件，转化为可追溯的培训 Brief、研究材料、Reveal.js WebPPT、逐页讲稿、中文语音、字幕和培训视频。
 
-当前源代码版本为 **v1.0.0**。外部模型、搜索、设计、TTS 与视频能力均通过版本化 Provider 接口接入，管理员可以替换 Huashu Design、文本/多模态模型、Agent-Reach、MeloTTS/Kokoro/Piper 和渲染器，而不改变工作流及审计语义。
+当前源代码版本为 **v1.0.1**。外部模型、搜索、设计、TTS 与视频能力均通过版本化 Provider 接口接入，管理员可以替换 Huashu Design、文本/多模态模型、Agent-Reach、MeloTTS/Kokoro/Piper 和渲染器，而不改变工作流及审计语义。
 
 ## 主要能力
 
@@ -57,6 +57,8 @@ npm run dev --workspace=@courseforge/api
 docker compose --env-file infra/.env -f infra/compose.yaml up -d --build --wait
 ```
 
+从 `v0.2.0-alpha.2` 保留数据升级时，必须先阅读 [v1.0.1 升级说明](docs/upgrade-v1.0.1.zh-CN.md)并运行只读预检；不要修改受版本控制的 Compose 文件，也不要执行 `down -v`。
+
 详细运维要求见[生产运维](docs/production-operations.md)，实际能力边界见[实现状态](docs/implementation-status.md)，目标主机交接步骤见[中文部署交接](docs/operator-deployment-handoff.zh-CN.md)。
 
 ## 敏感信息边界
@@ -73,14 +75,14 @@ npm run verify
 
 仓库内置 pre-commit、pre-push 和 CI 扫描；本地真实配置只能写入已忽略的 `.env`。任何曾出现在聊天、Issue、日志或提交历史中的密钥都必须先撤销并轮换，不能直接用于部署。
 
-## v1.0.0 的交付边界
+## v1.0.x 的交付边界
 
-v1.0.0 提供完整的平台代码、模块化适配器、耐久工作流、QA/发布链和容器拓扑，但不把环境相关能力冒充为已验收：
+v1.0.x 提供完整的平台代码、模块化适配器、耐久工作流、QA/发布链和容器拓扑，但不把环境相关能力冒充为已验收：
 
 - Huashu Design 适配器已实现并固定上游版本/许可；仓库不分发 Huashu sidecar 镜像。
-- Agent-Reach 必须由部署方安装受批准的可执行文件并配置出网策略。
+- 镜像包含受控 `mcporter` 可执行文件和无密钥 Exa 配置模板；部署方仍须通过 SecretRef 注入凭据并配置受批准的 DNS/出网策略。
 - 仓库不分发 MeloTTS、Kokoro 或 Piper 权重；模型许可、中文盲听和目标 CPU 性能必须单独验收。
 - Playwright/FFmpeg Worker 已实现；目标主机仍需完成镜像构建、字体/浏览器沙箱、真实 MP4 和资源占用验收。
-- SSO/OIDC 与 Temporal 是可选的后续适配器；v1.0.0 默认提供内部账户和 PostgreSQL lease queue。
+- SSO/OIDC 与 Temporal 是可选的后续适配器；v1.0.x 默认提供内部账户和 PostgreSQL lease queue。
 
 版本变更见 [CHANGELOG.md](CHANGELOG.md)。安全问题请按照 [SECURITY.md](SECURITY.md) 私下报告，禁止在公开 Issue 中附带凭据或内部数据。

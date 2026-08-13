@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "exa": {
+      "description": "CourseForge governed public-web search",
+      "baseUrl": "https://mcp.exa.ai/mcp",
+      "headers": {
+        "x-api-key": "$env:EXA_API_KEY"
+      },
+      "allowedTools": ["web_search_exa"]
+    }
+  },
+  "imports": []
+}

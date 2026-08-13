@@ -43,3 +43,6 @@ weights/
 compose.override.yaml
 compose.production.yaml
 config.production.json
+infra/mcporter.json
+infra/mcporter.local.json
+config/mcporter.json

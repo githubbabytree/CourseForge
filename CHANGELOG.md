@@ -2,6 +2,21 @@
 
 本项目遵循语义化版本。日期统一使用 UTC+8。
 
+## [1.0.1] - 2026-08-13
+
+### 修复
+
+- 修复主容器构建阶段缺少 Python，导致 `tts-worker` 编译失败的问题。
+- 修复 video-worker 镜像未按完整 workspace lockfile 安装嵌套生产依赖的问题。
+- Compose 项目名改为显式可配置，并增加 Alpha 升级卷/备份只读预检，避免旧数据因卷前缀变化而不可见。
+- 增加无明文凭据的 mcporter/Exa 配置模板和只读挂载入口。
+- 增加独立多 Origin CORS 配置，并保留单一 Public Origin 的兼容回退。
+- CI 增加主镜像及 video-worker 的真实构建、依赖导入和健康检查。
+
+### 文档
+
+- 增加 Alpha 到 v1.0.1 的中文升级流程、DNS 诊断、Provider 白名单、Search/Multimodal probe 和真实镜像 digest 说明。
+
 ## [1.0.0] - 2026-08-13
 
 CourseForge 首个正式源代码版本，提供从培训需求输入到 WebPPT、中文语音、视频、QA 和发布交付的一站式平台底座。

@@ -86,7 +86,7 @@ import { buildSelectedDeck, planDesign } from "./design-planning.js";
 import { createNarrationDeckFinalizer } from "./narration-deck.js";
 import { requireWorkflowActor } from "./workflow-authorization.js";
 
-export const API_VERSION = "1.0.0";
+export const API_VERSION = "1.0.1";
 const SESSION_COOKIE_NAME = "courseforge_session";
 const SESSION_TTL_MS = 8 * 60 * 60 * 1_000;
 
