@@ -1,6 +1,6 @@
 {
   "name": "@courseforge/workflow",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
@@ -17,7 +17,7 @@
     "test": "npm run build && node ../../scripts/run-built-tests.mjs"
   },
   "dependencies": {
-    "@courseforge/contracts": "1.1.0"
+    "@courseforge/contracts": "1.1.1"
   },
   "devDependencies": {
     "typescript": "^5.7.3"

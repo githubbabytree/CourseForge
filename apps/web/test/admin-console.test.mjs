@@ -46,3 +46,19 @@ test("forms expose labels, live errors and honest capability state", () => {
   assert.match(admin, /可从真实 API 列表选择/);
   assert.doesNotMatch(admin, /健康状态：可用|已成功连接 Provider/);
 });
+
+test("readiness panel explains legacy empty snapshots and offers a quick re-capture path", () => {
+  assert.match(admin, /恢复可运行状态/);
+  assert.match(admin, /旧版空快照按设计不可运行/);
+  assert.match(admin, /创建当前快照/);
+  assert.match(admin, /missing\.some\(item=>item\.component==="prompt"\)/);
+  assert.match(admin, /missing\.filter\(item=>item\.component==="provider"\)/);
+  assert.match(admin, /ReadinessPanel client=\{client\} writable=\{writable\}/);
+});
+
+test("missing catalog prompts offer an inline create-draft action that pins the prompt key", () => {
+  assert.match(admin, /已创建 \$\{definition\.promptKey\} 草稿/);
+  assert.match(admin, /promptKeys:\[definition\.promptKey\]/);
+  assert.match(admin, /创建草稿/);
+  assert.match(client, /promptKeys\?:string\[\]/);
+});

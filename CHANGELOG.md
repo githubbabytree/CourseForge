@@ -2,6 +2,18 @@
 
 本项目遵循语义化版本。日期统一使用 UTC+8。
 
+## [1.1.1] - 2026-08-13
+
+### 修复
+
+- 新装/升级后 Prompt Definition Catalog 全部 `missing`、快照无 Prompt 绑定导致 `course-full 不可启动`的问题：API 启动时自动为代码 Catalog 中缺失的业务 Prompt 创建草稿（幂等，只建 draft 不发布，不覆盖已有版本），可通过 `COURSEFORGE_AUTO_INIT_PROMPTS=0` 关闭。
+- 就绪度页在 `not_runnable` 时给出可操作指引（旧版空快照说明、缺失 Provider/Prompt 清单）并提供「创建当前快照」快捷入口。
+- Prompt Definition Catalog 的 `missing` 卡片提供「创建草稿」单键初始化按钮（仅 platform_admin 可见）。
+
+### 说明
+
+- 自动初始化只创建草稿；管理员仍需在 Prompts 页逐个发布，并补齐 Provider/词典/QA Policy/设计模板后创建新快照，就绪度才会转绿。
+
 ## [1.1.0] - 2026-08-13
 
 ### 新增

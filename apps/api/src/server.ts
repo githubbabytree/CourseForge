@@ -2,7 +2,7 @@ import { Pool } from "pg";
 import { API_VERSION, createApiServer, createAppState } from "./app.js";
 import { ConfiguredProviderProbe } from "./provider-runtime.js";
 import { InMemoryProviderGovernanceStore, PostgresProviderGovernanceStore, type ProviderGovernanceStore } from "./provider-governance.js";
-import { bootstrapAdministrator } from "./bootstrap.js";
+import { bootstrapAdministrator, bootstrapMissingPromptDrafts, SYSTEM_ACTOR_ID } from "./bootstrap.js";
 import { runMigrations } from "./migrations.js";
 import { PostgresCourseForgeRepository, type SqlQueryClient, type SqlTransactionRunner } from "./postgres-repository.js";
 import { InMemoryCourseForgeRepository, type CourseForgeRepository } from "./repositories.js";
@@ -67,6 +67,16 @@ if ((bootstrapEmail && !bootstrapPassword) || (!bootstrapEmail && bootstrapPassw
 }
 if (bootstrapEmail && bootstrapPassword) {
   await bootstrapAdministrator(repository, bootstrapEmail, bootstrapPassword);
+}
+const autoInitPrompts = process.env.COURSEFORGE_AUTO_INIT_PROMPTS === undefined
+  ? true
+  : process.env.COURSEFORGE_AUTO_INIT_PROMPTS !== "0" && process.env.COURSEFORGE_AUTO_INIT_PROMPTS !== "false";
+if (autoInitPrompts) {
+  const admin = bootstrapEmail ? await repository.findUserByEmail(bootstrapEmail.trim().toLowerCase()) : undefined;
+  const created = await bootstrapMissingPromptDrafts(repository, admin?.userId ?? SYSTEM_ACTOR_ID, "v1");
+  if (created.length > 0) {
+    process.stdout.write(`bootstrap: created ${created.length} missing business prompt drafts (${created.map((prompt) => prompt.promptKey).join(", ")}); publish them to make the course-full runtime ready\n`);
+  }
 }
 const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? "").split(",").map((value) => value.trim()).filter(Boolean);
 const secureCookieSetting = process.env.SECURE_COOKIES;

@@ -260,7 +260,7 @@ export interface CourseClient {
   createPromptVersion(input: CreatePromptVersionInput): Promise<PromptVersion>;
   transitionPromptVersion(promptVersionId: string, operation: "publish" | "deactivate"): Promise<PromptVersion>;
   getPromptCatalog():Promise<PromptCatalogDefinition[]>;
-  initializeMissingPrompts(input:{version:string;dryRun:boolean}):Promise<{dryRun:boolean;missing?:Array<{promptKey:string}>;created?:PromptVersion[]}>;
+  initializeMissingPrompts(input:{version:string;dryRun:boolean;promptKeys?:string[]}):Promise<{dryRun:boolean;missing?:Array<{promptKey:string}>;created?:PromptVersion[]}>;
   getRuntimeReadiness(snapshotId?:string):Promise<RuntimeReadiness>;
   captureRuntimeConfigSnapshot(): Promise<RuntimeConfigSnapshot>;
   getRuntimeConfigSnapshot(snapshotId: string): Promise<RuntimeConfigSnapshot>;
@@ -510,7 +510,7 @@ class HttpCourseClient implements CourseClient {
   async createPromptVersion(input: CreatePromptVersionInput) { return asPromptVersion(await this.request("/v1/admin/prompt-versions", { method: "POST", body: JSON.stringify(input) })); }
   async transitionPromptVersion(promptVersionId: string, operation: "publish" | "deactivate") { return asPromptVersion(await this.request(`/v1/admin/prompt-versions/${encodeURIComponent(promptVersionId)}/${operation}`, { method: "POST" })); }
   async getPromptCatalog(){const value=await this.request("/v1/admin/prompt-catalog") as {definitions:PromptCatalogDefinition[]};return value.definitions;}
-  async initializeMissingPrompts(input:{version:string;dryRun:boolean}){return this.request("/v1/admin/prompt-catalog/initialize",{method:"POST",body:JSON.stringify(input)}) as Promise<{dryRun:boolean;missing?:Array<{promptKey:string}>;created?:PromptVersion[]}>;}
+  async initializeMissingPrompts(input:{version:string;dryRun:boolean;promptKeys?:string[]}){return this.request("/v1/admin/prompt-catalog/initialize",{method:"POST",body:JSON.stringify(input)}) as Promise<{dryRun:boolean;missing?:Array<{promptKey:string}>;created?:PromptVersion[]}>;}
   async getRuntimeReadiness(snapshotId?:string){return this.request(`/v1/admin/runtime-readiness?profile=course-full${snapshotId?`&snapshotId=${encodeURIComponent(snapshotId)}`:""}`) as Promise<RuntimeReadiness>;}
   async captureRuntimeConfigSnapshot() { return asRuntimeConfigSnapshot(await this.request("/v1/admin/runtime-config-snapshots", { method: "POST" })); }
   async getRuntimeConfigSnapshot(snapshotId: string) { return asRuntimeConfigSnapshot(await this.request(`/v1/admin/runtime-config-snapshots/${encodeURIComponent(snapshotId)}`)); }
