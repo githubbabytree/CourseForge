@@ -88,7 +88,7 @@ abstract class OpenAICompatibleBase {
   }
 }
 
-function extractMessage(body: Record<string, unknown>, providerId: string): { content: string; usage?: TextGenerationResult["usage"] } {
+function extractMessage(body: Record<string, unknown>, providerId: string): { content: string; finishReason?: string; usage?: TextGenerationResult["usage"] } {
   const choices = body.choices;
   if (!Array.isArray(choices) || choices.length === 0) throw new ProviderAdapterError(`Provider ${providerId} response has no choices`, "invalid_response", providerId, false);
   const choice = choices[0];
@@ -100,7 +100,7 @@ function extractMessage(body: Record<string, unknown>, providerId: string): { co
     const raw = body.usage as Record<string, unknown>;
     if (typeof raw.prompt_tokens === "number" && typeof raw.completion_tokens === "number") usage = { inputTokens: raw.prompt_tokens, outputTokens: raw.completion_tokens };
   }
-  return { content: choice.message.content, ...(usage ? { usage } : {}) };
+  return { content: choice.message.content, ...(typeof choice.finish_reason === "string" ? { finishReason: choice.finish_reason } : {}), ...(usage ? { usage } : {}) };
 }
 
 function validateBasicSchema(value: unknown, schema: Readonly<Record<string, unknown>>, providerId: string): void {
@@ -127,6 +127,23 @@ export class OpenAICompatibleTextProvider extends OpenAICompatibleBase implement
     this.metadata = { id: config.id, kind: "text" as const, displayName: config.displayName, version: "openai-compatible-v1", capabilities: ["chat-completions", "structured-output", "capability-probe"] };
   }
 
+  async probe(): Promise<ProviderHealth> {
+    const checkedAt = new Date().toISOString();
+    try {
+      const result = await this.generate({
+        prompt: "Return the supplied capability nonce as strict JSON.",
+        responseSchema: { type: "object", additionalProperties: false, required: ["nonce"], properties: { nonce: { type: "string", enum: ["courseforge-text-probe-v1"] } } },
+        maxOutputTokens: 64,
+      }, { runId: "capability-probe", projectId: "capability-probe", configurationVersion: "capability-probe" });
+      if ((result.structured as { nonce?: unknown } | undefined)?.nonce !== "courseforge-text-probe-v1") throw new ProviderAdapterError(`Provider ${this.config.id} returned the wrong capability nonce`, "invalid_response", this.config.id, false);
+      return { healthy: true, checkedAt, detail: "strict structured generation succeeded" };
+    } catch (error) {
+      const detail = error instanceof ProviderAdapterError ? `${error.code}${error.status ? ` (${error.status})` : ""}` : "unexpected probe failure";
+      this.logger.warn("Text capability probe failed", { providerId: this.config.id, detail });
+      return { healthy: false, checkedAt, detail };
+    }
+  }
+
   async generate(request: TextGenerationRequest, context: RunContext): Promise<TextGenerationResult> {
     const body = await this.chat({
       messages: [...(request.system ? [{ role: "system", content: request.system }] : []), { role: "user", content: request.prompt }],
@@ -135,6 +152,7 @@ export class OpenAICompatibleTextProvider extends OpenAICompatibleBase implement
     }, context.signal);
     const message = extractMessage(body, this.config.id);
     if (!request.responseSchema) return { text: message.content, ...(message.usage ? { usage: message.usage } : {}) };
+    if (message.finishReason && message.finishReason !== "stop") throw new ProviderAdapterError(`Provider ${this.config.id} structured response did not finish normally`, "invalid_response", this.config.id, false);
     let structured: unknown;
     try { structured = JSON.parse(message.content); } catch (cause) {
       throw new ProviderAdapterError(`Provider ${this.config.id} structured response is not valid JSON`, "invalid_response", this.config.id, false, undefined, { cause });
@@ -154,7 +172,12 @@ export class OpenAICompatibleMultimodalProvider extends OpenAICompatibleBase imp
   async probe(): Promise<ProviderHealth> {
     const checkedAt = new Date().toISOString();
     try {
-      await this.inspect({ prompt: "Return only this JSON object: {\"multimodal\":true}", assets: [{ uri: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", mediaType: "image/png" }] }, { runId: "capability-probe", projectId: "capability-probe", configurationVersion: "capability-probe" });
+      const result = await this.inspect({
+        prompt: "Inspect the image. Return the dominant color name and the exact count of visible colored rectangles.",
+        assets: [{ uri: PROBE_IMAGE, mediaType: "image/png" }],
+        responseSchema: PROBE_SCHEMA,
+      }, { runId: "capability-probe", projectId: "capability-probe", configurationVersion: "capability-probe" });
+      if (result.observation.rectangleCount !== 2 || result.observation.dominantColor !== "red") throw new ProviderAdapterError(`Provider ${this.config.id} did not prove image comprehension`, "invalid_response", this.config.id, false);
       return { healthy: true, checkedAt, detail: "bounded image-input probe succeeded" };
     } catch (error) {
       const detail = error instanceof ProviderAdapterError ? `${error.code}${error.status ? ` (${error.status})` : ""}` : "unexpected probe failure";
@@ -168,13 +191,23 @@ export class OpenAICompatibleMultimodalProvider extends OpenAICompatibleBase imp
       { type: "text", text: request.prompt },
       ...request.assets.map((asset) => ({ type: "image_url", image_url: { url: asset.uri }, media_type: asset.mediaType })),
     ];
-    const body = await this.chat({ messages: [{ role: "user", content }], response_format: { type: "json_object" }, max_tokens: 1200 }, context.signal, 256 * 1024);
+    const schema = request.responseSchema ?? { type: "object", additionalProperties: true };
+    const body = await this.chat({ messages: [{ role: "user", content }], response_format: { type: "json_schema", json_schema: { name: "courseforge_visual_response", strict: true, schema } }, max_tokens: 1200 }, context.signal, 256 * 1024);
     const { content: output } = extractMessage(body, this.config.id);
     let observation: unknown;
     try { observation = JSON.parse(output); } catch (cause) {
       throw new ProviderAdapterError(`Provider ${this.config.id} multimodal response is not valid JSON`, "invalid_response", this.config.id, false, undefined, { cause });
     }
     assertRecord(observation, this.config.id, "multimodal observation");
+    validateBasicSchema(observation, schema, this.config.id);
     return { observation };
   }
 }
+
+const PROBE_SCHEMA = {
+  type: "object", additionalProperties: false, required: ["dominantColor", "rectangleCount"],
+  properties: { dominantColor: { type: "string", enum: ["red"] }, rectangleCount: { type: "integer", enum: [2] } },
+} as const;
+
+/** 32x16 PNG containing two red rectangles separated by a white gutter. */
+const PROBE_IMAGE = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAQCAIAAACQkWg2AAAAG0lEQVR4nGP8z0A+YKJA76jmUc2jmkc1j2qAAAB2AQEf1P8NAAAAAElFTkSuQmCC";

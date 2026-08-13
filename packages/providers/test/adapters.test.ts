@@ -43,10 +43,11 @@ test("HTTP adapters reject non-allowlisted origins before resolving credentials"
   assert.equal(resolved, false);
 });
 
-test("OpenAI-compatible adapters expose capability probe and reject malformed responses", async () => {
-  const probeFetch: FetchPort = async () => Response.json({ data: [{ id: "test-model" }] });
+test("OpenAI-compatible adapters expose a strict generation capability probe and reject malformed responses", async () => {
+  let probeBody="";const probeFetch: FetchPort = async (_input,init) => {probeBody=String(init?.body);return Response.json({ choices: [{finish_reason:"stop",message:{content:JSON.stringify({nonce:"courseforge-text-probe-v1"})}}] });};
   const provider = new OpenAICompatibleTextProvider(config, { fetch: probeFetch, secrets });
   assert.equal((await provider.probe()).healthy, true);
+  assert.match(probeBody,/json_schema/);assert.match(probeBody,/courseforge-text-probe-v1/);
 
   const malformed = new OpenAICompatibleTextProvider(config, { fetch: async () => Response.json({ choices: [] }), secrets });
   await assert.rejects(malformed.generate({ prompt: "x" }, context), (error: unknown) => error instanceof ProviderAdapterError && error.code === "invalid_response");

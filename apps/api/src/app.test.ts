@@ -8,7 +8,7 @@ import { InMemoryCourseForgeRepository } from "./repositories.js";
 import { PostgresCourseForgeRepository } from "./postgres-repository.js";
 import { hashPassword } from "./security.js";
 import { InMemoryArtifactBlobStore, persistBinaryArtifact, persistDeckArtifactBundle } from "./artifacts.js";
-import { InMemoryProviderGovernanceStore, lexiconHash } from "./provider-governance.js";
+import { InMemoryProviderGovernanceStore, lexiconHash, safeProbeResult } from "./provider-governance.js";
 
 const PASSWORD = "correct horse battery staple";
 
@@ -109,7 +109,7 @@ test("TTS generation is project-authorized and fails closed without a pinned TTS
   assert.equal((await fetch(`${base}/v1/projects/${project.projectId}/tts-generations`, { method: "POST", headers: { "content-type": "application/json" }, body })).status, 401);
   const response = await fetch(`${base}/v1/projects/${project.projectId}/tts-generations`, { method: "POST", headers: auth(cookie, { "content-type": "application/json" }), body });
   assert.equal(response.status, 409);
-  assert.equal(((await response.json()) as { error: { code: string } }).error.code, "tts_configuration_invalid");
+  assert.equal(((await response.json()) as { error: { code: string } }).error.code, "runtime_snapshot_missing");
 });
 
 test("TTS generation accepts only the published lexicon version pinned to its snapshot", async (t) => {
@@ -121,6 +121,11 @@ test("TTS generation accepts only the published lexicon version pinned to its sn
       allowedOrigins: ["http://tts.internal:8080"], voiceId: "zh-CN", sampleRateHz: 24_000, channels: 1, engineImageDigest: `sha256:${"a".repeat(64)}`,
       modelSha256: "b".repeat(64), modelLicenseId: "MIT" }, createdAt: new Date(0).toISOString(), createdBy: userId, publishedAt: new Date(0).toISOString(), inactiveAt: null };
   await repository.createProviderConfig(config);
+  await providerGovernance.saveProbe(safeProbeResult(config,userId,{healthy:true,capabilities:[...config.capabilities],detail:"short Chinese WAV synthesized"}));
+  const text:ProviderConfigVersionV1={schemaVersion:"1",configId:crypto.randomUUID(),kind:"text",providerId:"text",version:"v1",displayName:"Text",endpoint:"https://model.example/v1",model:"fixture",capabilities:["structured-output"],settings:{allowedOrigins:["https://model.example"]},secretRefs:{primary:"env://TEXT_KEY"},status:"published",createdAt:new Date(0).toISOString(),createdBy:userId,publishedAt:new Date(0).toISOString(),inactiveAt:null};
+  await repository.createProviderConfig(text);
+  await providerGovernance.saveProbe(safeProbeResult(text,userId,{healthy:true,capabilities:[...text.capabilities],detail:"strict JSON generated"}));
+  await repository.createPromptVersion({schemaVersion:"1",promptVersionId:crypto.randomUUID(),promptKey:"tts.duration-revision",version:"v1",description:"duration",template:"governed duration prompt",status:"published",createdAt:new Date(0).toISOString(),createdBy:userId,publishedAt:new Date(0).toISOString(),inactiveAt:null});
   const snapshot = await repository.captureRuntimeConfigSnapshot(crypto.randomUUID(), new Date(0).toISOString(), userId);
   const entries = [{ term: "钓鱼", pronunciation: "diao3 yu2", locale: "zh-CN" as const, notes: "" }];
   const draft = PronunciationLexiconVersionV1Schema.parse({ schemaVersion: "1", lexiconId: crypto.randomUUID(), name: "security", version: "v1", entries,
@@ -170,7 +175,7 @@ test("video generation requires authentication, project membership, durable stag
   const route = `${owner.base}/v1/projects/${project.projectId}/video-generations`;
   assert.equal((await fetch(route, { method: "POST", headers: { "content-type": "application/json" }, body })).status, 401);
   const unavailable = await fetch(route, { method: "POST", headers: auth(owner.cookie, { "content-type": "application/json" }), body });
-  assert.equal(unavailable.status, 409); assert.equal(((await unavailable.json()) as { error: { code: string } }).error.code, "video_configuration_invalid");
+  assert.equal(unavailable.status, 409); assert.equal(((await unavailable.json()) as { error: { code: string } }).error.code, "runtime_snapshot_missing");
   const outsiderId = crypto.randomUUID(); await owner.repository.saveUser({ schemaVersion: CONTRACT_VERSION, userId: outsiderId, email: "video-outsider@example.test", displayName: "outsider",
     role: "course_editor", passwordHash: await hashPassword(PASSWORD), disabled: false });
   const login = await fetch(`${owner.base}/v1/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "video-outsider@example.test", password: PASSWORD }) });

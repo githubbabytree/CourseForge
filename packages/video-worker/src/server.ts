@@ -4,8 +4,8 @@ import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { chromium } from "playwright-core";
 import { createS3ArtifactReader } from "./artifacts.js";
-import { MAX_OUTPUT_BYTES, MAX_REQUEST_BYTES, VIDEO_WORKER_ENGINE, VIDEO_WORKER_PROTOCOL_VERSION, parseRenderRequest } from "./protocol.js";
-import { renderVideo } from "./render.js";
+import { MAX_OUTPUT_BYTES, MAX_REQUEST_BYTES, VIDEO_WORKER_ENGINE, VIDEO_WORKER_PROTOCOL_VERSION, parseRenderRequest, type WorkerRenderRequest } from "./protocol.js";
+import { renderSlideImages, renderVideo } from "./render.js";
 
 const env = (name: string): string => { const value = process.env[name]?.trim(); if (!value) throw new Error(`${name} is required`); return value; };
 const host = process.env.HOST ?? "127.0.0.1"; const port = Number(process.env.PORT ?? 3020); const revision = env("VIDEO_WORKER_ENGINE_REVISION"); const authToken = env("VIDEO_WORKER_AUTH_TOKEN");
@@ -27,12 +27,15 @@ const readBody = async (request: IncomingMessage): Promise<unknown> => { const c
 
 createServer(async (request, response) => {
   if (request.method === "GET" && request.url === "/health") return json(response, 200, { status: "ok", service: "video-worker", protocolVersion: VIDEO_WORKER_PROTOCOL_VERSION, engine: VIDEO_WORKER_ENGINE, engineRevision: revision, browserRevision, ffmpegRevision, fontBundleSha256, rendererImageDigest });
-  if (request.method !== "POST" || request.url !== "/v1/render") return json(response, 404, { error: { code: "not_found", message: "Not found" } });
+  if (request.method !== "POST" || (request.url !== "/v1/render"&&request.url!=="/v1/render-slides"&&request.url!=="/v1/probe")) return json(response, 404, { error: { code: "not_found", message: "Not found" } });
   if (!authorized(request)) return json(response, 401, { error: { code: "unauthorized", message: "Authentication required" } });
   if (busy) return json(response, 429, { error: { code: "busy", message: "Renderer is busy" } });
   busy = true; const controller = new AbortController(); request.once("aborted", () => controller.abort());
   try {
-    const input = parseRenderRequest(await readBody(request), revision); const result = await renderVideo(input, reader, tools, timeoutMs, controller.signal);
+    if(request.url==="/v1/probe"){const fixture=videoProbeFixture(revision);const probeReader={read:async(ref:string)=>{const bytes=fixture.artifacts.get(ref);if(!bytes)throw new Error("probe_artifact_missing");return bytes;}};const slides=await renderSlideImages(fixture.request,probeReader),result=await renderVideo(fixture.request,probeReader,tools,Math.min(timeoutMs,120_000),controller.signal);return json(response,200,{schemaVersion:"1",engine:VIDEO_WORKER_ENGINE,engineRevision:revision,width:1920,height:1080,fps:30,frameCount:result.frameCount,durationMs:result.durationMs,mp4Sha256:result.contentHash,slidePngSha256:slides[0]!.contentHash,browserRevision,ffmpegRevision,fontBundleSha256,rendererImageDigest});}
+    const input = parseRenderRequest(await readBody(request), revision);
+    if(request.url==="/v1/render-slides"){const slides=await renderSlideImages(input,reader);return json(response,200,{schemaVersion:"1",deckContentHash:input.inlineManifest.revealContentHash,slides:slides.map(slide=>({slideId:slide.slideId,contentSha256:slide.contentHash,pngBase64:Buffer.from(slide.bytes).toString("base64")}))});}
+    const result = await renderVideo(input, reader, tools, timeoutMs, controller.signal);
     if (result.bytes.byteLength > MAX_OUTPUT_BYTES) throw new Error("video_too_large");
     response.writeHead(200, { "content-type": "video/mp4", "content-length": result.bytes.byteLength, "cache-control": "no-store", "x-content-type-options": "nosniff", "x-content-sha256": result.contentHash, "x-video-duration-ms": result.durationMs, "x-video-frame-count": result.frameCount, "x-video-engine": VIDEO_WORKER_ENGINE, "x-video-engine-revision": revision, "x-browser-revision": browserRevision, "x-ffmpeg-revision": ffmpegRevision, "x-font-bundle-sha256": fontBundleSha256, "x-renderer-image-digest": rendererImageDigest }); response.end(result.bytes);
   } catch (error) {
@@ -40,6 +43,8 @@ createServer(async (request, response) => {
     json(response, status, { error: { code, message: status === 500 ? "Video rendering failed" : "Video render request is invalid" } });
   } finally { busy = false; }
 }).listen(port, host, () => process.stdout.write(`video-worker listening on ${host}:${port}\n`));
+
+function videoProbeFixture(engineRevision:string):{request:WorkerRenderRequest;artifacts:Map<string,Uint8Array>}{const deck=Buffer.from('<!doctype html><main class="reveal"><div class="slides"><section data-slide-id="slide-probe"><h2>CourseForge</h2><p>视频能力探针</p></section></div></main>',"utf8"),frames=48_000,audio=Buffer.alloc(44+frames*2);audio.write("RIFF",0);audio.writeUInt32LE(audio.length-8,4);audio.write("WAVEfmt ",8);audio.writeUInt32LE(16,16);audio.writeUInt16LE(1,20);audio.writeUInt16LE(1,22);audio.writeUInt32LE(48_000,24);audio.writeUInt32LE(96_000,28);audio.writeUInt16LE(2,32);audio.writeUInt16LE(16,34);audio.write("data",36);audio.writeUInt32LE(frames*2,40);const deckHash=createHash("sha256").update(deck).digest("hex"),audioHash=createHash("sha256").update(audio).digest("hex"),deckRef=`s3://courseforge-probe/artifacts/artifact-${"a".repeat(64)}`,audioRef=`s3://courseforge-probe/artifacts/artifact-${"b".repeat(64)}`;const request:WorkerRenderRequest={schemaVersion:"2",engine:"playwright-ffmpeg",engineRevision,deckArtifactRef:deckRef,audioArtifactRefs:[audioRef],quality:"final",inlineManifest:{schemaVersion:"2",revealContentHash:deckHash,renderManifest:{schemaVersion:"1",renderId:"probe",width:1920,height:1080,fps:30,output:{container:"mp4",videoCodec:"h264",pixelFormat:"yuv420p",audioCodec:"aac"},segments:[{slideId:"slide-probe",order:0,durationMs:1000,transition:"fade",sourceHash:deckHash}]},speechManifest:{totalMeasuredDurationMs:1000,slides:[{slideId:"slide-probe",order:0,measuredDurationMs:1000,audioContentHash:audioHash}]},imageAssets:[],transitionPolicy:{schemaVersion:"1",policyVersion:"xfade-v1",durationMs:300}}};return{request,artifacts:new Map([[deckRef,deck],[audioRef,audio]])};}
 
 function chromiumExecutable(): string {
   const fromEnv = process.env.CHROMIUM_PATH?.trim();

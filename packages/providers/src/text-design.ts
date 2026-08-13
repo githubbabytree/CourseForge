@@ -61,6 +61,7 @@ export class TextBackedDesignProvider implements DesignProvider {
         directionThemeTokens: input.directionThemeTokens ?? {},
         template: input.template ?? null,
         brandAssets: input.brandAssets ?? [],
+        styleProfile: input.styleProfile ?? null,
         sections,
       }),
       responseSchema: {

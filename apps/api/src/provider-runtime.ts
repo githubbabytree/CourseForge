@@ -4,6 +4,8 @@ import type { ProjectV1, PromptVersionV1, ProviderConfigVersionV1, RuntimeConfig
 import { InMemoryArtifactStore, createDeckArtifactBuilder } from "@courseforge/deck";
 import {
   AgentReachSearchProvider,
+  HttpBinaryTtsSidecarProvider,
+  HttpBinaryVideoSidecarProvider,
   HuashuDesignHttpProvider,
   InMemoryPromptRepository,
   OpenAICompatibleTextProvider,
@@ -23,6 +25,7 @@ import { persistBinaryArtifact, persistContentJsonArtifact, persistDeckArtifactB
 import type { CourseForgeRepository } from "./repositories.js";
 import type { ProviderProbePort } from "./provider-governance.js";
 import { enforceProjectDataPolicy } from "./project-data-policy.js";
+import { promptContentHash } from "./prompt-catalog.js";
 
 const CONTENT_STAGES = new Set(["research", "material", "deck"]);
 const RESEARCH_PROMPT_KEY = "course.research";
@@ -119,7 +122,7 @@ const boundPrompt = async (repository: CourseForgeRepository, snapshot: RuntimeC
   const binding = snapshot.promptBindings.find((item) => item.promptKey === key);
   if (!binding) throw new Error(`Runtime snapshot has no ${key} prompt binding`);
   const prompt = await repository.findPromptVersion(binding.promptVersionId);
-  if (!prompt || prompt.promptKey !== key || prompt.version !== binding.version) throw new Error(`Runtime snapshot prompt ${key} is unavailable`);
+  if (!prompt || prompt.promptKey !== key || prompt.version !== binding.version || !binding.contentHash || binding.contentHash !== promptContentHash(prompt)) throw new Error(`Runtime snapshot prompt ${key} is unavailable or its content hash is not pinned`);
   return prompt;
 };
 export const findSnapshotPrompt = boundPrompt;
@@ -155,12 +158,42 @@ export interface PersistedProviderRuntimeOptions {
 }
 
 export class ConfiguredProviderProbe implements ProviderProbePort {
-  constructor(private options:PersistedProviderRuntimeOptions={}){}
+  constructor(private options:PersistedProviderRuntimeOptions={},private repository?:CourseForgeRepository){}
   async probe(config:ProviderConfigVersionV1){
-    if(config.kind!=="text"&&config.kind!=="multimodal")return{healthy:false,capabilities:[],errorCode:"unavailable" as const,detail:`No governed probe adapter for ${config.kind}`};
-    try{if(!config.endpoint||!config.model)throw new Error("Model probe configuration is incomplete");const allowedOrigins=settingStrings(config,"allowedOrigins");if(!allowedOrigins.includes(new URL(config.endpoint).origin))throw new Error("Endpoint origin is not allowlisted");const secretRef=Object.values(config.secretRefs)[0];if(!secretRef)throw new Error("Secret reference is missing");const Ctor=config.kind==="multimodal"?OpenAICompatibleMultimodalProvider:OpenAICompatibleTextProvider;const provider=new Ctor({id:config.providerId,displayName:config.displayName,baseUrl:config.endpoint.replace(/\/chat\/completions\/?$/,""),allowedOrigins,model:config.model,secretRef,timeoutMs:settingNumber(config,"timeoutMs",60_000)},{secrets:this.options.secrets??new EnvironmentSecretResolver(),...(this.options.fetch?{fetch:this.options.fetch}:{})});const health=await provider.probe();return{healthy:health.healthy,capabilities:health.healthy?[...config.capabilities]:[],...(health.healthy?{}:{errorCode:"upstream" as const,detail:health.detail??"Probe returned unhealthy"})};}catch{return{healthy:false,capabilities:[],errorCode:"invalid_configuration" as const,detail:"Model provider probe configuration is invalid"}}
+    try {
+      const health = await this.#probe(config);
+      const errorCode = health.healthy ? undefined : probeErrorCode(health.detail);
+      return { healthy: health.healthy, capabilities: health.healthy ? [...config.capabilities] : [], ...(health.healthy ? {} : { errorCode, detail: health.detail ?? "Capability probe returned unhealthy" }) };
+    } catch (error) {
+      const detail=error instanceof Error?error.message:"Provider capability probe failed";
+      return{healthy:false,capabilities:[],errorCode:probeErrorCode(detail),detail:detail.slice(0,500)};
+    }
   }
+
+  async #probe(config:ProviderConfigVersionV1){
+    const secrets=this.options.secrets??new EnvironmentSecretResolver();
+    if(config.kind==="text"||config.kind==="multimodal"){
+      if(!config.endpoint||!config.model)throw new Error("invalid_configuration: model endpoint and model are required");const allowedOrigins=settingStrings(config,"allowedOrigins");if(!allowedOrigins.includes(new URL(config.endpoint).origin))throw new Error("invalid_configuration: endpoint origin is not allowlisted");const secretRef=Object.values(config.secretRefs)[0];if(!secretRef)throw new Error("invalid_configuration: secret reference is missing");const Ctor=config.kind==="multimodal"?OpenAICompatibleMultimodalProvider:OpenAICompatibleTextProvider;const provider=new Ctor({id:config.providerId,displayName:config.displayName,baseUrl:config.endpoint.replace(/\/chat\/completions\/?$/,""),allowedOrigins,model:config.model,secretRef,timeoutMs:settingNumber(config,"timeoutMs",60_000)},{secrets,...(this.options.fetch?{fetch:this.options.fetch}:{})});return provider.probe();
+    }
+    if(config.kind==="search"){
+      const executable=settingString(config,"executable","mcporter"),allowed=settingStrings(config,"allowedExecutables");const secretRef=config.secretRefs.exa??Object.values(config.secretRefs)[0];if(!secretRef)throw new Error("invalid_configuration: search secret reference is missing");const secret=await secrets.resolve(secretRef);if(!secret)throw new Error("authentication: search secret is unavailable");const environmentName=["EXA","API","KEY"].join("_");const runner=this.options.commandRunner??new SpawnCommandRunner({...process.env,[environmentName]:secret});const provider=new AgentReachSearchProvider({id:config.providerId,executable,allowedExecutables:allowed,timeoutMs:settingNumber(config,"timeoutMs",60_000),maxResults:3},runner);const results=await provider.search({query:"site:example.com CourseForge capability probe",limit:2},{runId:"capability-probe",projectId:"capability-probe",configurationVersion:config.configId});if(results.length<1||results.some(result=>{try{return !/^https?:$/.test(new URL(result.url).protocol)}catch{return true}}))throw new Error("invalid_response: search returned no valid public URL");return{healthy:true,checkedAt:new Date().toISOString(),detail:`fixed public search returned ${results.length} validated result(s)`};
+    }
+    if(config.kind==="tts"){
+      if(!config.endpoint)throw new Error("invalid_configuration: TTS endpoint is required");const engine=settingString(config,"engine");if(engine!=="melo"&&engine!=="kokoro"&&engine!=="piper")throw new Error("invalid_configuration: unsupported TTS engine");const channels=settingNumber(config,"channels",1);if(channels!==1&&channels!==2)throw new Error("invalid_configuration: invalid TTS channel count");const provider=new HttpBinaryTtsSidecarProvider({id:config.providerId,displayName:config.displayName,engine,engineRevision:settingString(config,"engineRevision"),baseUrl:config.endpoint,allowedOrigins:settingStrings(config,"allowedOrigins"),...(Object.values(config.secretRefs)[0]?{secretRef:Object.values(config.secretRefs)[0]}:{}),timeoutMs:settingNumber(config,"timeoutMs",60_000),maxAudioBytes:settingNumber(config,"maxAudioBytes",20*1024*1024),modelSha256:settingString(config,"modelSha256"),modelLicenseId:settingString(config,"modelLicenseId"),output:{container:"wav",sampleRateHz:settingNumber(config,"sampleRateHz",24_000),channels}},{...(this.options.fetch?{fetch:this.options.fetch}:{}),secrets});const voices=await provider.listVoices();const voiceId=settingString(config,"voiceId");if(!voices.some(voice=>voice.id===voiceId&&voice.languages.includes("zh-CN")))throw new Error("invalid_response: configured Chinese voice is unavailable");const audio=await provider.synthesize({text:"安全培训能力探针。",voiceId,format:"wav"},{runId:"capability-probe",projectId:"capability-probe",configurationVersion:config.configId});if(audio.mediaType!=="audio/wav"||audio.sampleRateHz!==settingNumber(config,"sampleRateHz",24_000)||audio.channels!==channels||!audio.bytes?.length)throw new Error("invalid_response: TTS did not return the pinned WAV profile");return{healthy:true,checkedAt:new Date().toISOString(),detail:"voice catalog, model provenance, and short Chinese WAV synthesis succeeded"};
+    }
+    if(config.kind==="video"){
+      if(!config.endpoint)throw new Error("invalid_configuration: video endpoint is required");const engine=settingString(config,"engine");if(engine!=="playwright-ffmpeg"&&engine!=="ffmpeg")throw new Error("invalid_configuration: unsupported video engine");const provider=new HttpBinaryVideoSidecarProvider({id:config.providerId,displayName:config.displayName,engine,engineRevision:settingString(config,"engineRevision"),baseUrl:config.endpoint,allowedOrigins:settingStrings(config,"allowedOrigins"),...(Object.values(config.secretRefs)[0]?{secretRef:Object.values(config.secretRefs)[0]}:{}),rendererImageDigest:settingString(config,"rendererImageDigest"),browserRevision:settingString(config,"browserRevision"),ffmpegRevision:settingString(config,"ffmpegRevision"),fontBundleSha256:settingString(config,"fontBundleSha256"),timeoutMs:settingNumber(config,"timeoutMs",300_000),maxVideoBytes:settingNumber(config,"maxVideoBytes",256*1024*1024)},{...(this.options.fetch?{fetch:this.options.fetch}:{}),secrets});return provider.probe();
+    }
+    if(config.kind==="design"){
+      if(!this.repository)throw new Error("unavailable: design probe needs configuration repository");const text=(await this.repository.listProviderConfigs()).find(item=>item.kind==="text"&&item.status==="published");if(!text)throw new Error("invalid_configuration: published text provider is required");const promptVersions=await this.repository.listPromptVersions(),deckPrompt=promptVersions.find(item=>item.promptKey==="course.deck"&&item.status==="published"),directionPrompt=promptVersions.find(item=>item.promptKey==="course.design-directions"&&item.status==="published");const textProvider=await this.#textProvider(text,secrets);const provider=createDesignProvider(config,textProvider,secrets,this.options,deckPrompt,directionPrompt);const context={runId:"capability-probe",projectId:"capability-probe",configurationVersion:config.configId};const directions=await provider.proposeDirections({title:"安全培训",audience:"员工",durationMinutes:5},context);if(directions.length<1)throw new Error("invalid_response: design direction probe returned empty");const deck=await provider.buildDeck({title:"安全培训",audience:"员工",durationMinutes:5,directionId:directions[0]!.id,directionThemeTokens:directions[0]!.themeTokens,outline:["安全行动"]},context);if(deck.slides.length<1)throw new Error("invalid_response: minimal DeckSpec probe returned empty");return{healthy:true,checkedAt:new Date().toISOString(),detail:"design directions and minimal DeckSpec succeeded"};
+    }
+    throw new Error(`unavailable: no governed probe adapter for ${config.kind}`);
+  }
+
+  async #textProvider(config:ProviderConfigVersionV1,secrets:SecretResolver){if(!config.endpoint||!config.model)throw new Error("invalid_configuration: text provider is incomplete");const allowedOrigins=settingStrings(config,"allowedOrigins"),secretRef=Object.values(config.secretRefs)[0];if(!secretRef)throw new Error("invalid_configuration: text secret is missing");return new OpenAICompatibleTextProvider({id:config.providerId,displayName:config.displayName,baseUrl:config.endpoint.replace(/\/chat\/completions\/?$/,""),allowedOrigins,model:config.model,secretRef,timeoutMs:settingNumber(config,"timeoutMs",60_000)},{secrets,...(this.options.fetch?{fetch:this.options.fetch}:{})});}
 }
+
+const probeErrorCode=(detail?:string):"unavailable"|"timeout"|"authentication"|"upstream"|"invalid_configuration"=>{const value=(detail??"").toLowerCase();if(value.includes("authentication")||value.includes("401")||value.includes("403"))return"authentication";if(value.includes("timeout")||value.includes("aborted"))return"timeout";if(value.includes("invalid_configuration")||value.includes("invalid configuration")||value.includes("allowlist")||value.includes("required"))return"invalid_configuration";if(value.includes("unavailable")||value.includes("no governed"))return"unavailable";return"upstream";};
 
 export async function createSnapshotMultimodalRuntime(repository:CourseForgeRepository,projectId:string,snapshotId:string,options:PersistedProviderRuntimeOptions={}):Promise<{snapshot:RuntimeConfigSnapshotRecordV1;provider:MultimodalModelProvider;config:ProviderConfigVersionV1}> {
   const snapshot=await repository.findRuntimeConfigSnapshot(snapshotId);if(!snapshot)throw new Error("Snapshot unavailable");
@@ -215,7 +248,7 @@ export function createDesignProvider(
     }, { ...(options.fetch ? { fetch: options.fetch } : {}), secrets: secretResolver });
   }
   if (designConfig.providerId === "text-backed-design") {
-    if (!designPrompt || designPrompt.promptKey !== "course.deck" || designPrompt.status !== "published"||!directionPrompt||directionPrompt.promptKey!=="course.design-directions"||directionPrompt.status!=="published") throw new Error("Published design prompts are required for text-backed design");
+    if (!designPrompt || designPrompt.promptKey !== "course.deck"||!directionPrompt||directionPrompt.promptKey!=="course.design-directions") throw new Error("Snapshot-bound design prompts are required for text-backed design");
     return new TextBackedDesignProvider({
       id: designConfig.providerId,
       displayName: designConfig.displayName,

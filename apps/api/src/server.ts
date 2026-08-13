@@ -79,7 +79,7 @@ const documentParser = documentParserFromEnvironment();
 const artifactS3Bucket = (process.env.ARTIFACT_S3_BUCKET ?? process.env.S3_BUCKET)?.trim();
 const artifactGarbageCollector=createArtifactGcFromEnv();
 const appState = createAppState(repository, artifactStorage.store, undefined, { allowedSearchExecutables }, documentParser,
-  { ...(artifactS3Bucket ? { artifactS3Bucket } : {}) }, durableWorkflowStore, revisionRepository, providerGovernance, new ConfiguredProviderProbe(),artifactGarbageCollector,designTemplates);
+  { ...(artifactS3Bucket ? { artifactS3Bucket } : {}) }, durableWorkflowStore, revisionRepository, providerGovernance, new ConfiguredProviderProbe({ allowedSearchExecutables }, repository),artifactGarbageCollector,designTemplates);
 const server = createApiServer(appState, {
   allowedOrigins,
   deploymentRevision,

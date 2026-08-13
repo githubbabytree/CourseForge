@@ -19,6 +19,8 @@ export interface BinaryTtsSidecarConfig {
   readonly secretRef?: string;
   readonly timeoutMs?: number;
   readonly maxAudioBytes?: number;
+  readonly modelSha256?: string;
+  readonly modelLicenseId?: string;
   readonly output: {
     readonly container: "wav" | "pcm_s16le";
     readonly sampleRateHz: number;
@@ -68,7 +70,8 @@ export class HttpBinaryTtsSidecarProvider implements TTSProvider {
   async listVoices(): Promise<readonly VoiceProfile[]> {
     const body = await readJsonResponse(await this.request("v1/voices", { method: "GET" }), this.config.id, 512 * 1024);
     assertRecord(body, this.config.id, "voices response");
-    if (body.schemaVersion !== TTS_SIDECAR_PROTOCOL_VERSION || body.engine !== this.config.engine || !Array.isArray(body.voices)) throw invalidResponse(this.config.id, "voice catalog");
+    if (body.schemaVersion !== TTS_SIDECAR_PROTOCOL_VERSION || body.engine !== this.config.engine || !Array.isArray(body.voices)
+      || (this.config.modelSha256!==undefined&&body.modelSha256!==this.config.modelSha256)||(this.config.modelLicenseId!==undefined&&body.modelLicense!==this.config.modelLicenseId)) throw invalidResponse(this.config.id, "voice catalog");
     return body.voices.map((value, index) => {
       assertRecord(value, this.config.id, `voice ${index}`);
       if (typeof value.id !== "string" || value.id.length < 1 || value.id.length > 160 || typeof value.displayName !== "string" || value.displayName.length < 1 || value.displayName.length > 200
@@ -99,6 +102,7 @@ export class HttpBinaryTtsSidecarProvider implements TTSProvider {
     const digest = createHash("sha256").update(raw).digest("hex");
     const declaredHash = response.headers.get("x-content-sha256");
     if (!declaredHash || !/^[a-f0-9]{64}$/u.test(declaredHash) || declaredHash !== digest) throw invalidResponse(this.config.id, "audio hash");
+    if((this.config.modelSha256!==undefined&&response.headers.get("x-tts-model-sha256")!==this.config.modelSha256)||(this.config.modelLicenseId!==undefined&&response.headers.get("x-tts-model-license")!==this.config.modelLicenseId))throw invalidResponse(this.config.id,"model provenance");
     if (lexicon && (response.headers.get("x-tts-lexicon-id") !== lexicon.lexiconId
       || response.headers.get("x-tts-lexicon-version") !== lexicon.version
       || response.headers.get("x-tts-lexicon-sha256") !== lexicon.contentHash)) throw invalidResponse(this.config.id, "lexicon provenance");

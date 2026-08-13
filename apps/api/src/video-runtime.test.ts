@@ -4,6 +4,7 @@ import test from "node:test";
 import { SpeechManifestV1Schema, VideoRenderManifestV1Schema, type DeckSpecV1, type ProviderConfigVersionV1 } from "@courseforge/contracts";
 import { InMemoryArtifactStore, createDeckArtifactBuilder } from "@courseforge/deck";
 import type { FetchPort } from "@courseforge/providers";
+import sharp from "sharp";
 import { InMemoryCheckpointStore, InMemoryWorkflowEngine } from "@courseforge/workflow";
 import { InMemoryArtifactBlobStore, persistBinaryArtifact, persistDeckArtifactBundle } from "./artifacts.js";
 import { InMemoryCourseForgeRepository } from "./repositories.js";
@@ -44,9 +45,11 @@ test("persisted video run sends the exact S3 worker protocol and stores a proven
   const speechArtifact = await persistBinaryArtifact({ repository, blobStore, projectId, jobId: speech.jobId, configurationVersion: snapshot.snapshotId, providerId: "tts", kind: "tts-manifest", mediaType: "application/json",
     content: Buffer.from(JSON.stringify(speech)), sourceArtifactIds: [audio.artifactId] });
   const videoBytes = mp4(); const videoHash = createHash("sha256").update(videoBytes).digest("hex");
-  const fetch: FetchPort = async (_url, init) => { const posted = JSON.parse(String(init?.body)) as Record<string, unknown>; assert.match(String(posted.deckArtifactRef), /^s3:\/\/courseforge-artifacts\/artifacts\/artifact-/);
+  const slidePng=await sharp({create:{width:1920,height:1080,channels:3,background:"#081421"}}).png().toBuffer(),slideHash=createHash("sha256").update(slidePng).digest("hex");
+  const fetch: FetchPort = async (url, init) => { const posted = JSON.parse(String(init?.body)) as Record<string, unknown>; assert.match(String(posted.deckArtifactRef), /^s3:\/\/courseforge-artifacts\/artifacts\/artifact-/);
     assert.deepEqual(Object.keys(posted.inlineManifest as object).sort(), ["imageAssets", "renderManifest", "revealContentHash", "schemaVersion", "speechManifest","transitionPolicy"]); assert.equal(posted.engine, "playwright-ffmpeg");assert.equal(posted.schemaVersion,"2");
     assert.deepEqual((posted.inlineManifest as { imageAssets: unknown[] }).imageAssets, []);
+    if(String(url).endsWith("/v1/render-slides"))return Response.json({schemaVersion:"1",deckContentHash:bundle.artifacts.revealHtml.contentHash,slides:[{slideId:"slide-one",contentSha256:slideHash,pngBase64:slidePng.toString("base64")}]});
     return new Response(new Uint8Array(videoBytes), { headers: { "content-type": "video/mp4", "content-length": String(videoBytes.length), "x-content-sha256": videoHash,
       "x-video-duration-ms": "1033", "x-video-frame-count": "31", "x-video-engine": "playwright-ffmpeg", "x-video-engine-revision": "renderer-1",
       "x-renderer-image-digest": `sha256:${"a".repeat(64)}`, "x-browser-revision": "chromium-1", "x-ffmpeg-revision": "ffmpeg-7", "x-font-bundle-sha256": "b".repeat(64) } }); };
@@ -58,6 +61,7 @@ test("persisted video run sends the exact S3 worker protocol and stores a proven
   const manifest = VideoRenderManifestV1Schema.parse(JSON.parse(Buffer.from((await blobStore.get(manifestMetadata.artifactId))!).toString("utf8")));
   assert.equal(manifest.speechDurationMs, 1001); assert.equal(manifest.durationMs, 1033); assert.equal(manifest.frameCount, 31); assert.equal(manifest.segments[0]?.frameCount, 31); assert.equal(manifest.segments[0]?.audioContentHash, audio.contentHash);assert.equal(manifest.renderMode,"final-static-xfade-v1");assert.equal(manifest.evidenceClass,"deterministic-final");assert.deepEqual(manifest.transitions,[]);
   assert.ok(artifacts.some((item) => item.kind === "video-render-input" && item.artifactId === manifest.renderInputArtifactId));
+  assert.ok(artifacts.some((item)=>item.kind==="slide-render-png"&&item.sourceArtifactIds.includes(bundle.artifacts.deckSpec.artifactId)));
   assert.ok(manifestMetadata.sourceArtifactIds.includes(manifest.mp4ArtifactId));
 });
 

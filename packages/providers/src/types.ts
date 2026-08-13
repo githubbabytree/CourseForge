@@ -99,6 +99,8 @@ export interface TextModelProvider extends BaseProvider {
 export interface MultimodalRequest {
   readonly prompt: string;
   readonly assets: readonly { readonly uri: string; readonly mediaType: string }[];
+  /** Strict JSON Schema expected from OpenAI-compatible structured outputs. */
+  readonly responseSchema?: Readonly<Record<string, unknown>>;
 }
 
 export interface MultimodalResult {
@@ -134,6 +136,7 @@ export interface CourseDesignInput {
   readonly audience: string;
   readonly durationMinutes: number;
   readonly brandAssets?: readonly string[];
+  readonly styleProfile?: Readonly<Record<string, unknown>>;
 }
 
 export interface DesignDirection {

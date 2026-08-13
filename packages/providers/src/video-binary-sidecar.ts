@@ -31,6 +31,7 @@ export interface BinaryVideoRenderRequest {
   readonly inlineManifest?: Readonly<Record<string, unknown>>;
   readonly quality: "draft" | "final";
 }
+export interface BinarySlideRender { readonly slideId:string;readonly bytes:Uint8Array;readonly contentHash:string }
 
 export interface BinaryVideoSidecarDependencies { readonly fetch?: FetchPort; readonly secrets?: SecretResolver; readonly logger?: ProviderLogger }
 
@@ -49,8 +50,10 @@ export class HttpBinaryVideoSidecarProvider implements VideoRendererProvider {
     const checkedAt = new Date().toISOString();
     try {
       const body = await readJsonResponse(await this.request("health", { method: "GET" }), this.config.id, 64 * 1024); assertRecord(body, this.config.id, "health response");
-      return body.status === "ok" && body.engine === this.config.engine && body.engineRevision === this.config.engineRevision
-        ? { healthy: true, checkedAt, detail: "video engine revision is ready" } : { healthy: false, checkedAt, detail: "video engine or revision mismatch" };
+      const healthMatches=body.status === "ok" && body.engine === this.config.engine && body.engineRevision === this.config.engineRevision
+        && body.rendererImageDigest === this.config.rendererImageDigest && body.browserRevision === this.config.browserRevision
+        && body.ffmpegRevision === this.config.ffmpegRevision && body.fontBundleSha256 === this.config.fontBundleSha256
+      if(!healthMatches)return{healthy:false,checkedAt,detail:"video engine or revision mismatch"};const probe=await readJsonResponse(await this.request("v1/probe",{method:"POST",headers:{accept:"application/json"}}),this.config.id,64*1024);assertRecord(probe,this.config.id,"video probe response");const digest=(value:unknown)=>typeof value==="string"&&/^[a-f0-9]{64}$/u.test(value);return probe.schemaVersion==="1"&&probe.engine===this.config.engine&&probe.engineRevision===this.config.engineRevision&&probe.width===1920&&probe.height===1080&&probe.fps===30&&typeof probe.frameCount==="number"&&probe.frameCount>0&&digest(probe.mp4Sha256)&&digest(probe.slidePngSha256)&&probe.rendererImageDigest===this.config.rendererImageDigest&&probe.browserRevision===this.config.browserRevision&&probe.ffmpegRevision===this.config.ffmpegRevision&&probe.fontBundleSha256===this.config.fontBundleSha256?{healthy:true,checkedAt,detail:"one-page PNG and MP4 render probe succeeded"}:{healthy:false,checkedAt,detail:"video render probe evidence mismatch"};
     } catch (error) {
       const detail = error instanceof ProviderAdapterError ? error.code : "unexpected probe failure";
       this.#logger.warn("Video render sidecar probe failed", { providerId: this.config.id, detail }); return { healthy: false, checkedAt, detail };
@@ -80,6 +83,8 @@ export class HttpBinaryVideoSidecarProvider implements VideoRendererProvider {
       || provenance.ffmpegRevision !== this.config.ffmpegRevision || provenance.fontBundleSha256 !== this.config.fontBundleSha256) throw invalidResponse(this.config.id, "video provenance metadata");
     return { uri: `artifact://sha256/${digest}`, durationMs, frameCount, contentHash: digest, bytes, mediaType: "video/mp4", provenance };
   }
+
+  async renderSlides(input:BinaryVideoRenderRequest,context:RunContext):Promise<readonly BinarySlideRender[]>{validateInput(input,this.config.id);const requestBody=JSON.stringify({schemaVersion:"2",engine:this.config.engine,engineRevision:this.config.engineRevision,...input});if(Buffer.byteLength(requestBody)>MAX_VIDEO_MANIFEST_BYTES)throw invalidConfig(this.config.id);const body=await readJsonResponse(await this.request("v1/render-slides",{method:"POST",headers:{"content-type":"application/json",accept:"application/json"},body:requestBody},context.signal),this.config.id,128*1024*1024);assertRecord(body,this.config.id,"slide render response");if(body.schemaVersion!=="1"||!Array.isArray(body.slides)||body.slides.length<1||body.slides.length>200)throw invalidResponse(this.config.id,"slide render response");const seen=new Set<string>();return body.slides.map((raw,index)=>{assertRecord(raw,this.config.id,`slide ${index}`);if(typeof raw.slideId!=="string"||seen.has(raw.slideId)||typeof raw.contentSha256!=="string"||!/^[a-f0-9]{64}$/u.test(raw.contentSha256)||typeof raw.pngBase64!=="string"||raw.pngBase64.length>14*1024*1024)throw invalidResponse(this.config.id,`slide ${index}`);seen.add(raw.slideId);const bytes=Buffer.from(raw.pngBase64,"base64");if(bytes.byteLength<24||bytes.byteLength>10*1024*1024||!bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))||createHash("sha256").update(bytes).digest("hex")!==raw.contentSha256)throw invalidResponse(this.config.id,`slide ${index} PNG`);return{slideId:raw.slideId,bytes:Uint8Array.from(bytes),contentHash:raw.contentSha256};});}
 
   /** Compatibility with VideoRendererProvider. manifestUri remains a controlled reference; outputUri is never sent to the sidecar. */
   render(request: { readonly manifestUri: string; readonly outputUri: string; readonly quality: "draft" | "final" }, context: RunContext): Promise<VideoArtifact> {

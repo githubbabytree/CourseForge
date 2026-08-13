@@ -54,6 +54,7 @@ test("persisted TTS run produces measured per-slide WAV, manifest and monotonic 
     const body = JSON.parse(String(init?.body)) as { schemaVersion: string; pronunciationLexicon: { lexiconId: string; contentHash: string } };
     assert.equal(body.schemaVersion, "2"); assert.equal(body.pronunciationLexicon.lexiconId, lexicon.lexiconId);
     return new Response(new Uint8Array(audio), { headers: { "content-type": "audio/wav", "content-length": String(audio.length), "x-content-sha256": digest, "x-audio-duration-ms": "1000",
+      "x-tts-model-sha256": "b".repeat(64), "x-tts-model-license": "MIT",
       "x-tts-lexicon-id": lexicon.lexiconId, "x-tts-lexicon-version": lexicon.version, "x-tts-lexicon-sha256": lexicon.contentHash } });
   };
   const executor = await createPersistedTtsExecutor(repository, blobStore, projectId, snapshot.snapshotId, bundle.artifacts.deckSpec.artifactId, { fetch, pronunciationLexicon: lexicon });
@@ -97,7 +98,7 @@ async function durationFixture(options: { prompt?: boolean; policy?: "internal" 
     finalizeNarrationDeck: createNarrationDeckFinalizer(repository, blobStore, revisions, actorId) };
 }
 
-const responseAudio = (durationMs: number) => { const audio = wav(durationMs); return new Response(new Uint8Array(audio), { headers: { "content-type": "audio/wav", "content-length": String(audio.length), "x-content-sha256": createHash("sha256").update(audio).digest("hex"), "x-audio-duration-ms": String(durationMs) } }); };
+const responseAudio = (durationMs: number) => { const audio = wav(durationMs); return new Response(new Uint8Array(audio), { headers: { "content-type": "audio/wav", "content-length": String(audio.length), "x-content-sha256": createHash("sha256").update(audio).digest("hex"), "x-audio-duration-ms": String(durationMs), "x-tts-model-sha256":"b".repeat(64), "x-tts-model-license":"MIT" } }); };
 
 test("duration loop applies bounded speed then one governed narration revision with exact provenance", async () => {
   const fixture = await durationFixture({ prompt: true }); const speeds: number[] = []; let textCalls = 0;

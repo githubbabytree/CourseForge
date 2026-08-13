@@ -13,7 +13,7 @@ const start = async (t: TestContext) => {
     await repository.saveUser({ schemaVersion: CONTRACT_VERSION, userId: crypto.randomUUID(), email: `${role}@example.test`,
       displayName: role, role, passwordHash: await hashPassword(PASSWORD), disabled: false });
   }
-  const server = createApiServer(createAppState(repository));
+  const state=createAppState(repository);state.providerProbe={probe:async(config)=>({healthy:true,capabilities:[...config.capabilities],detail:"test capability exercised"})};const server = createApiServer(state);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve)); t.after(() => server.close());
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const login = async (role: UserRole) => {
@@ -40,6 +40,8 @@ test("provider versions are immutable, admin-governed and secret references are 
   assert.equal((await fetch(`${base}/v1/admin/provider-configs`, { headers: { cookie: editor } })).status, 403);
   const auditorBody = await fetch(`${base}/v1/admin/provider-configs`, { headers: { cookie: auditor } }).then((response) => response.text());
   assert.match(auditorBody, /\[CONFIGURED\]/); assert.doesNotMatch(auditorBody, /COURSEFORGE_TEXT_API_KEY/);
+  assert.equal((await fetch(`${base}/v1/admin/provider-configs/${created.configId}/publish`, { method: "POST", headers: { cookie: admin } })).status,409);
+  assert.equal((await fetch(`${base}/v1/admin/provider-configs/${created.configId}/probes`, { method: "POST", headers: { cookie: admin } })).status,201);
   const published = await fetch(`${base}/v1/admin/provider-configs/${created.configId}/publish`, { method: "POST", headers: { cookie: admin } });
   assert.equal(published.status, 200);
   assert.equal((await fetch(`${base}/v1/admin/provider-configs/${created.configId}/publish`, { method: "POST", headers: { cookie: admin } })).status, 409);
@@ -65,8 +67,9 @@ test("plaintext secrets and credential-bearing endpoints are rejected", async (t
 test("published prompts and provider bindings produce reproducible immutable snapshots", async (t) => {
   const { base, admin, auditor, editor } = await start(t);
   const provider = await fetch(`${base}/v1/admin/provider-configs`, { method: "POST", headers: json(admin), body: JSON.stringify({ kind: "search", providerId: "agent-reach", version: "2026.08", displayName: "Search", settings: {}, secretRefs: {} }) }).then((r) => r.json()) as { configId: string };
+  await fetch(`${base}/v1/admin/provider-configs/${provider.configId}/probes`, { method: "POST", headers: { cookie: admin } });
   await fetch(`${base}/v1/admin/provider-configs/${provider.configId}/publish`, { method: "POST", headers: { cookie: admin } });
-  const prompt = await fetch(`${base}/v1/admin/prompt-versions`, { method: "POST", headers: json(admin), body: JSON.stringify({ promptKey: "research.material", version: "v1", description: "grounded", template: "仅根据引用生成：{{sources}}" }) }).then((r) => r.json()) as { promptVersionId: string };
+  const prompt = await fetch(`${base}/v1/admin/prompt-versions`, { method: "POST", headers: json(admin), body: JSON.stringify({ promptKey: "course.material", version: "v1", description: "grounded", template: "仅根据引用生成：{{sourcesJson}}" }) }).then((r) => r.json()) as { promptVersionId: string };
   assert.equal((await fetch(`${base}/v1/admin/prompt-versions/${prompt.promptVersionId}/deactivate`, { method: "POST", headers: { cookie: admin } })).status, 409);
   await fetch(`${base}/v1/admin/prompt-versions/${prompt.promptVersionId}/publish`, { method: "POST", headers: { cookie: admin } });
   const capturedResponse = await fetch(`${base}/v1/admin/runtime-config-snapshots`, { method: "POST", headers: { cookie: admin } });
@@ -93,5 +96,5 @@ test("content generation is authenticated and fails closed for an unavailable sn
   assert.equal((await fetch(endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ snapshotId: crypto.randomUUID() }) })).status, 401);
   const rejected = await fetch(endpoint, { method: "POST", headers: json(admin), body: JSON.stringify({ snapshotId: crypto.randomUUID() }) });
   assert.equal(rejected.status, 409);
-  assert.equal((await rejected.json() as { error: { code: string } }).error.code, "provider_configuration_invalid");
+  assert.equal((await rejected.json() as { error: { code: string } }).error.code, "runtime_snapshot_missing");
 });

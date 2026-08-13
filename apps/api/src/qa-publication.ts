@@ -4,6 +4,7 @@ import { persistBinaryArtifact, type ArtifactBlobStore, type ArtifactKind, type 
 import { listImageAssets } from "./image-assets.js";
 import type { CourseForgeRepository } from "./repositories.js";
 import type { RevisionRepository } from "./revision-repository.js";
+import { findCurrentVisualConfirmation, latestVisualReview } from "./visual-review.js";
 
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 export const speakerNarrationSynchronized = (
@@ -67,6 +68,7 @@ export async function runMachineQa(repository: CourseForgeRepository, blobs: Art
   const evidenceSatisfied=policy.rules.requiredVideoEvidenceLevel==="preview-only"||isFinalVideoEvidence(video);
   const provenance = mp4?.projectId === projectId && mp4.kind === "video-mp4" && video.videoCodec === "h264" && video.audioCodec === "aac" && video.pixelFormat === "yuv420p" && evidenceSatisfied && /^sha256:[a-f0-9]{64}$/u.test(video.rendererImageDigest) && /^[a-f0-9]{64}$/u.test(video.fontBundleSha256);
   check("video-provenance", provenance, "视频必须为 Final 确定性静态截图与白名单过渡、受支持编码、固定渲染镜像及同项目 MP4；Draft 仅供预览。", [videoSource.metadata.artifactId, ...(mp4 ? [mp4.artifactId] : [])]);
+  const visual=await latestVisualReview(repository,blobs,projectId);const visualCurrent=Boolean(visual&&visual.review.deckArtifactId===deckSource.metadata.artifactId&&visual.review.deckContentSha256===deckSource.metadata.contentHash);check("visual-deterministic",visualCurrent&&visual!.review.deterministicBlockerCount===0,"当前 Deck 的逐页 PNG 确定性视觉检查必须无 blocker。",visual?[visual.artifact.artifactId,...visual.review.slides.map(slide=>slide.renderArtifactId)]:[]);
   const createdAt = new Date().toISOString(); const report = QaReportV1Schema.parse({ schemaVersion: "1", qaReportId: crypto.randomUUID(), projectId, ...input, configurationSnapshotId: speech.configurationSnapshotId, qaPolicy:snapshot.qaPolicyBinding, checks, blockerCount: checks.filter((item) => item.status === "blocked").length, warningCount: checks.filter((item) => item.status === "warning").length, createdAt, createdBy: actor.userId });
   const artifact = await persistBinaryArtifact({ repository, blobStore: blobs, projectId, jobId: crypto.randomUUID(), configurationVersion: speech.configurationSnapshotId, providerId: "machine-qa-v1", kind: "qa-report", mediaType: "application/json", content: json(report), sourceArtifactIds: [input.deckArtifactId, input.speechManifestArtifactId, input.videoManifestArtifactId], createdAt });
   return { report, artifact };
@@ -91,6 +93,7 @@ export async function publishCourse(repository: CourseForgeRepository, blobs: Ar
   const approvalArtifacts = (await repository.listArtifactMetadata(projectId)).filter((item) => item.kind === "qa-approval" && item.sourceArtifactIds.includes(qaReportArtifactId));
   const approvals = await Promise.all(approvalArtifacts.map(async (item) => ({ item, value: QaApprovalV1Schema.parse((await verifiedJson(repository, blobs, projectId, item.artifactId, "qa-approval")).value) })));
   const policy=await repository.findQaPolicyVersion(report.qaPolicy.qaPolicyId);if(!policy||policy.version!==report.qaPolicy.version||policy.contentHash!==report.qaPolicy.contentHash)throw new Error("qa_policy_binding_invalid");
+  const deckMetadata=await repository.findArtifactMetadata(report.deckArtifactId);if(!deckMetadata||!await findCurrentVisualConfirmation(repository,blobs,projectId,report.deckArtifactId,deckMetadata.contentHash))throw new Error("visual_confirmation_missing");
   const selected = policy.rules.requiredApprovalTypes.map((type) => approvals.filter(({ value }) => value.type === type).sort((a, b) => b.value.approvedAt.localeCompare(a.value.approvedAt))[0]);
   if (selected.some((item) => !item)) throw new Error("human_approvals_missing");
   const video = VideoRenderManifestV1Schema.parse((await verifiedJson(repository, blobs, projectId, report.videoManifestArtifactId, "video-manifest")).value);
