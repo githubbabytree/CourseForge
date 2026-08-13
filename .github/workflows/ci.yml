@@ -64,7 +64,7 @@ jobs:
             -e VIDEO_WORKER_AUTH_TOKEN \
             -e VIDEO_WORKER_IMAGE_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
             -e VIDEO_WORKER_S3_ENDPOINT=http://127.0.0.1:9000 \
-            -e VIDEO_WORKER_S3_REGION=us-east-1 -e VIDEO_WORKER_S3_BUCKET=ci \
+            -e VIDEO_WORKER_S3_REGION=us-east-1 -e VIDEO_WORKER_S3_BUCKET=ci-artifacts \
             -e VIDEO_WORKER_S3_ACCESS_KEY -e VIDEO_WORKER_S3_SECRET_KEY \
             courseforge-video-worker:ci
           for attempt in $(seq 1 30); do
