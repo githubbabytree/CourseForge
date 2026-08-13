@@ -26,7 +26,7 @@ function flattenSpeech(request: WorkerRenderRequest): SpeechManifestInput {
 
 async function captureSlides(html: string, request: WorkerRenderRequest, directory: string, assets: Map<string, LoadedImageAsset>): Promise<Record<string, string>> {
   if (!/^<!doctype html>/iu.test(html) || /<iframe\b/iu.test(html) || /<(?:object|embed)\b/iu.test(html)) throw new Error("unsafe_deck_html");
-  const browser = await chromium.launch({ headless: true, chromiumSandbox: true, args: ["--disable-dev-shm-usage", "--disable-background-networking"] });
+  const browser = await chromium.launch({ headless: true, chromiumSandbox: process.env.VIDEO_WORKER_CHROMIUM_SANDBOX !== "false", args: ["--disable-dev-shm-usage", "--disable-background-networking"] });
   try {
     const context = await browser.newContext({ viewport: { width: 1920, height: 1080 }, javaScriptEnabled: false, deviceScaleFactor: 1 });
     let controlledHtml = html; const paths = new Map<string, LoadedImageAsset>();

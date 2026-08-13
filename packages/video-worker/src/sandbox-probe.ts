@@ -1,7 +1,7 @@
 import { chromium } from "playwright-core";
 
 const executablePath = process.env.CHROMIUM_PATH?.trim() || chromium.executablePath();
-const browser = await chromium.launch({ executablePath, headless: true, chromiumSandbox: true, args: ["--disable-dev-shm-usage", "--disable-background-networking"] });
+const browser = await chromium.launch({ executablePath, headless: true, chromiumSandbox: process.env.VIDEO_WORKER_CHROMIUM_SANDBOX !== "false", args: ["--disable-dev-shm-usage", "--disable-background-networking"] });
 try {
   const page = await browser.newPage({ javaScriptEnabled: false });
   await page.setContent("<!doctype html><title>CourseForge sandbox probe</title><p>ok</p>");

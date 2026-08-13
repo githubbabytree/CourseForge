@@ -2,6 +2,13 @@
 
 本项目遵循语义化版本。日期统一使用 UTC+8。
 
+## [1.1.3] - 2026-08-13
+
+### 修复
+
+- 修复 QA Policy、发音词典、设计模板「发布/停用」在真实 PostgreSQL 上仍返回 500 的问题：`to_jsonb(timestamptz)` 会把 `2026-08-13T15:31:52.297Z` 序列化为 `2026-08-13T15:31:52.297+00:00`，与契约 `z.string().datetime()` 严格校验不符（v1.1.2 修复类型推断时引入的回归）；JSON 写入改用独立 text 参数，保留原始 ISO 字符串。
+- video-worker 的 Chromium launch 在部分宿主机内核（如 Synology DSM）上因 sandbox 不可用而失败：`chromiumSandbox` 改为可由 `VIDEO_WORKER_CHROMIUM_SANDBOX` 环境变量显式关闭（默认仍为 `true`，关闭即降级为容器网络隔离 + 无外网渲染，部署方需在目标机验收中记录）。
+
 ## [1.1.2] - 2026-08-13
 
 ### 修复
